@@ -429,29 +429,21 @@ These must be answered before the milestone that depends on them.
 
 ## 17. Getting started (developers)
 
-> The project is in planning. These steps describe the target setup once milestone 1 lands.
-
-Prerequisites: Node.js 22 LTS, npm, Docker (optional), and a Claude Desktop or other MCP client for testing.
+Prerequisites: Node.js 22 or newer and npm. The MCP server itself is not built yet (see Status).
 
 ```powershell
-# 1. Install dependencies
+# Install dependencies
 npm install
 
-# 2. Copy the example environment file and fill in local values
-Copy-Item .env.example .env
+# Type-check and build
+npm run typecheck
+npm run build
 
-# 3. Run the test suite (no network calls, uses the mock booking adapter)
+# Unit tests (offline, use captured LibCal fixtures)
 npm test
 
-# 4. Start the server in local stdio mode
-npm start
-```
-
-To run in Docker:
-
-```powershell
-docker build -t mru-room-booking .
-docker run --rm -p 8080:8080 --env-file .env mru-room-booking
+# Live read-only check against the real MRU LibCal site (never books)
+$env:LIVE = "1"; npm run test:live
 ```
 
 Never commit `.env`, real session secrets, or recorded fixtures that contain personal data. Sanitise fixtures before adding them to `test/`.
@@ -466,4 +458,12 @@ Never commit `.env`, real session secrets, or recorded fixtures that contain per
 
 ## Status
 
-Planning. No runtime code yet. The next step is Milestone 0, which needs answers to the questions in [section 16](#16-open-questions).
+**Sprint 1 (done):** search service and LibCal library-site adapter, read-only.
+
+- `src/adapter/libcal/` reads MRU LibCal: the availability grid (`/spaces/availability/grid`) and room detail pages (`/space/{id}`). It skips rooms that are switched off or return a 404 page.
+- `src/search/` validates a request (slot alignment, duration, past times, horizon) and matches group rooms by capacity and free time. It returns `nextAvailable` times when nothing matches.
+- No booking, cancellation or login is implemented yet. The MCP tool layer is the next sprint.
+
+**Assumptions to confirm with the library:** a grid slot with any `className` is taken and a slot without one is free (checked against the live search page for one room). The 120-minute maximum and 14-day horizon in `src/search/policy.ts` are placeholders. The grid and room pages are unofficial, so the adapter fails loudly with `LIBRARY_FORMAT_CHANGED` if their shape changes.
+
+Sprint 1 documentation (progress, requirement status, challenges, demo plan and the D2L post draft): [docs/sprint-1.md](docs/sprint-1.md).
