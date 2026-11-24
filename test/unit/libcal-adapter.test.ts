@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { LibCalClient, type LibCalClientOptions } from "../../src/adapter/libcal/client.js";
 import { LibCalRoomSource } from "../../src/adapter/libcal/libcal-room-source.js";
 import { LibraryUnavailableError } from "../../src/domain/errors.js";
+import { SearchService } from "../../src/search/search-service.js";
 
-const gridJson = readFileSync(new URL("../fixtures/grid-2026-11-23.json", import.meta.url), "utf8");
-const spacePageHtml = readFileSync(new URL("../fixtures/space-7561.html", import.meta.url), "utf8");
+const searchHtml = readFileSync(new URL("../fixtures/search-2026-11-24-1400.html", import.meta.url), "utf8");
 
 const options: LibCalClientOptions = {
   baseUrl: "https://librarycal.example",
@@ -22,7 +22,6 @@ interface Call {
   init: RequestInit;
 }
 
-/** Fake fetch that records calls and answers from a router. */
 function fakeFetch(route: (url: string, init: RequestInit) => Response | Promise<Response>): {
   fetch: (input: string, init?: RequestInit) => Promise<Response>;
   calls: Call[];
@@ -38,29 +37,32 @@ function fakeFetch(route: (url: string, init: RequestInit) => Response | Promise
 }
 
 describe("LibCalClient", () => {
-  it("posts the grid query with the Referer and Origin LibCal expects", async () => {
-    const f = fakeFetch(() => new Response(gridJson, { status: 200 }));
+  it("requests the search page for the window with every grouping and size", async () => {
+    const f = fakeFetch(() => new Response(searchHtml, { status: 200 }));
     const client = new LibCalClient(options, f.fetch, noSleep, () => 0);
-    await client.fetchGrid("2026-11-23");
+    await client.fetchSearchPage("2026-11-24", "14:00", "24:00");
 
     const [call] = f.calls;
-    expect(call!.url).toBe("https://librarycal.example/spaces/availability/grid");
-    expect(call!.init.method).toBe("POST");
-    const headers = call!.init.headers as Record<string, string>;
-    expect(headers.Referer).toContain("/spaces");
-    expect(headers.Origin).toBe("https://librarycal.example");
-    expect(headers["User-Agent"]).toBe("test-agent");
-
-    const body = new URLSearchParams(call!.init.body as string);
-    expect(body.get("lid")).toBe("1140");
-    expect(body.get("start")).toBe("2026-11-23");
-    expect(body.get("end")).toBe("2026-11-24");
+    const url = new URL(call!.url);
+    expect(url.origin + url.pathname).toBe("https://librarycal.example/spaces");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      m: "t",
+      lid: "1140",
+      gid: "0",
+      capacity: "0",
+      date: "2026-11-24",
+      "date-end": "2026-11-24",
+      start: "14:00",
+      end: "24:00",
+    });
+    expect(call!.init.method).toBe("GET");
+    expect((call!.init.headers as Record<string, string>)["User-Agent"]).toBe("test-agent");
   });
 
   it("maps an HTTP error status to LibraryUnavailableError", async () => {
     const f = fakeFetch(() => new Response("oops", { status: 500 }));
     const client = new LibCalClient(options, f.fetch, noSleep, () => 0);
-    await expect(client.fetchGrid("2026-11-23")).rejects.toBeInstanceOf(LibraryUnavailableError);
+    await expect(client.fetchSearchPage("2026-11-24", "14:00", "15:00")).rejects.toBeInstanceOf(LibraryUnavailableError);
   });
 
   it("maps a network failure to LibraryUnavailableError", async () => {
@@ -68,7 +70,9 @@ describe("LibCalClient", () => {
       throw new TypeError("fetch failed");
     });
     const client = new LibCalClient(options, f.fetch, noSleep, () => 0);
-    await expect(client.fetchGrid("2026-11-23")).rejects.toMatchObject({ code: "LIBRARY_UNAVAILABLE" });
+    await expect(client.fetchSearchPage("2026-11-24", "14:00", "15:00")).rejects.toMatchObject({
+      code: "LIBRARY_UNAVAILABLE",
+    });
   });
 
   it("aborts a request that exceeds the timeout", async () => {
@@ -79,13 +83,7 @@ describe("LibCalClient", () => {
         }),
     );
     const client = new LibCalClient({ ...options, timeoutMs: 20 }, f.fetch, noSleep, () => 0);
-    await expect(client.fetchGrid("2026-11-23")).rejects.toThrow(/timed out/);
-  });
-
-  it("rejects non-JSON grid responses", async () => {
-    const f = fakeFetch(() => new Response("<html>Maintenance</html>", { status: 200 }));
-    const client = new LibCalClient(options, f.fetch, noSleep, () => 0);
-    await expect(client.fetchGrid("2026-11-23")).rejects.toBeInstanceOf(LibraryUnavailableError);
+    await expect(client.fetchSearchPage("2026-11-24", "14:00", "15:00")).rejects.toThrow(/timed out/);
   });
 
   it("spaces consecutive requests by minIntervalMs", async () => {
@@ -95,87 +93,51 @@ describe("LibCalClient", () => {
       sleeps.push(ms);
       clock += ms;
     };
-    const f = fakeFetch(() => new Response(gridJson, { status: 200 }));
+    const f = fakeFetch(() => new Response(searchHtml, { status: 200 }));
     const client = new LibCalClient({ ...options, minIntervalMs: 500 }, f.fetch, sleep, () => clock);
-    await client.fetchGrid("2026-11-23");
-    await client.fetchRoomPage(7561, "2026-11-23");
+    await client.fetchSearchPage("2026-11-24", "14:00", "15:00");
+    await client.fetchSearchPage("2026-11-24", "15:00", "16:00");
     expect(f.calls).toHaveLength(2);
+    expect(sleeps).toEqual([500]);
+  });
+
+  it("never sleeps longer than minIntervalMs, even if the clock steps backwards", async () => {
+    let clock = 3_600_000;
+    const sleeps: number[] = [];
+    const f = fakeFetch(() => new Response(searchHtml, { status: 200 }));
+    const client = new LibCalClient(
+      { ...options, minIntervalMs: 500 },
+      f.fetch,
+      async (ms) => void sleeps.push(ms),
+      () => clock,
+    );
+    await client.fetchSearchPage("2026-11-24", "14:00", "15:00");
+    clock = 0;
+    await client.fetchSearchPage("2026-11-24", "15:00", "16:00");
     expect(sleeps).toEqual([500]);
   });
 });
 
 describe("LibCalRoomSource", () => {
-  /** Serves the captured grid, and a room page for any requested room id. */
-  function libraryFake(): ReturnType<typeof fakeFetch> {
-    return fakeFetch((url) => {
-      if (url.includes("/spaces/availability/grid")) return new Response(gridJson, { status: 200 });
-      const m = /\/space\/(\d+)/.exec(url);
-      if (m) {
-        // The captured page is for room 7561; rewrite its id for other rooms.
-        return new Response(spacePageHtml.replaceAll("eid_7561", `eid_${m[1]}`), { status: 200 });
-      }
-      return new Response("not found", { status: 404 });
-    });
-  }
-
-  it("leaves out rooms the library has switched off", async () => {
-    const off = readFileSync(new URL("../fixtures/space-7587-unavailable.html", import.meta.url), "utf8");
-    const f = fakeFetch((url) => {
-      if (url.includes("/spaces/availability/grid")) return new Response(gridJson, { status: 200 });
-      if (url.endsWith("/space/7587?date=2026-11-23")) return new Response(off, { status: 200 });
-      const m = /\/space\/(\d+)/.exec(url)!;
-      return new Response(spacePageHtml.replaceAll("eid_7561", `eid_${m[1]}`), { status: 200 });
-    });
+  it("answers a search with one live request and no caching", async () => {
+    const f = fakeFetch(() => new Response(searchHtml, { status: 200 }));
     const source = new LibCalRoomSource(new LibCalClient(options, f.fetch, noSleep, () => 0));
-    const rooms = await source.getAvailability("2026-11-23");
-    expect(rooms).toHaveLength(44);
-    expect(rooms.some((r) => r.room.id === 7587)).toBe(false);
+    const rooms = await source.getAvailability("2026-11-24", 840, 900);
+    await source.getAvailability("2026-11-24", 840, 900);
+
+    expect(f.calls).toHaveLength(2);
+    expect(new URL(f.calls[0]!.url).searchParams.get("start")).toBe("14:00");
+    expect(new URL(f.calls[0]!.url).searchParams.get("end")).toBe("15:00");
+    expect(rooms.find((r) => r.room.id === 7572)?.free).toEqual([{ start: 870, end: 930 }]);
   });
 
-  it("returns every room in the grid with its free windows and details", async () => {
-    const f = libraryFake();
+  it("drives the search service end to end: only pods free at 14:00, so it suggests 2-C at 14:30", async () => {
+    const f = fakeFetch(() => new Response(searchHtml, { status: 200 }));
     const source = new LibCalRoomSource(new LibCalClient(options, f.fetch, noSleep, () => 0));
-    const rooms = await source.getAvailability("2026-11-23");
+    const search = new SearchService(source, undefined, () => new Date("2026-11-24T15:00:00Z")); // morning in Edmonton
+    const result = await search.findRooms({ date: "2026-11-24", start: "14:00", end: "15:00", partySize: 3 });
 
-    expect(rooms).toHaveLength(45);
-    const oneB = rooms.find((r) => r.room.id === 7561)!;
-    expect(oneB.room).toEqual({
-      id: 7561,
-      name: "1-B group room (1st floor, EL1136)",
-      grouping: "Group Rooms - 1st Floor",
-      capacity: 5,
-    });
-    expect(oneB.free).toEqual([
-      { start: 900, end: 960 },
-      { start: 1200, end: 1440 },
-    ]);
-  });
-
-  it("reuses cached room details instead of re-reading room pages", async () => {
-    const f = libraryFake();
-    const source = new LibCalRoomSource(new LibCalClient(options, f.fetch, noSleep, () => 0), {
-      roomCacheMs: 60_000,
-    }, () => 0);
-    await source.getAvailability("2026-11-23");
-    const firstPageCalls = f.calls.filter((c) => c.url.includes("/space/")).length;
-    await source.getAvailability("2026-11-23");
-    const secondPageCalls = f.calls.filter((c) => c.url.includes("/space/")).length;
-
-    expect(firstPageCalls).toBe(45);
-    expect(secondPageCalls).toBe(45);
-  });
-
-  it("re-reads room details once the cache is stale", async () => {
-    let clock = 0;
-    const f = libraryFake();
-    const source = new LibCalRoomSource(
-      new LibCalClient(options, f.fetch, noSleep, () => 0),
-      { roomCacheMs: 1000 },
-      () => clock,
-    );
-    await source.getAvailability("2026-11-23");
-    clock = 5000;
-    await source.getAvailability("2026-11-23");
-    expect(f.calls.filter((c) => c.url.includes("/space/")).length).toBe(90);
+    expect(result.matches).toEqual([]);
+    expect(result.nextAvailable[0]).toMatchObject({ room: { id: 7572 }, start: "14:30", end: "15:30" });
   });
 });

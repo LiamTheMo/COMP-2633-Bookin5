@@ -13,6 +13,14 @@ export interface Room {
   grouping: string;
   /** Maximum number of people the room is listed for. */
   capacity: number;
+  features: RoomFeatures;
+}
+
+/** Amenities LibCal lists for a room (the icons on each search result). */
+export interface RoomFeatures {
+  accessible: boolean;
+  power: boolean;
+  videoConferencing: boolean;
 }
 
 /** A continuous period when a room is free. `end` may be 1440 (midnight). */
@@ -23,14 +31,16 @@ export interface FreeWindow {
 
 export interface RoomAvailability {
   room: Room;
-  /** Sorted, non-overlapping free windows for the requested date. */
+  /** Free windows on the requested date, sorted by start. */
   free: FreeWindow[];
 }
 
 /**
- * Anything that can say which rooms exist and when they are free.
- * The LibCal adapter is one implementation; tests use fakes.
+ * Anything that can say which rooms are free around a requested window.
+ * Must return at least every room free for the whole of [startMin, endMin);
+ * may also return nearby windows as alternatives. The LibCal adapter is one
+ * implementation; tests use fakes.
  */
 export interface RoomSource {
-  getAvailability(date: string): Promise<RoomAvailability[]>;
+  getAvailability(date: string, startMin: number, endMin: number): Promise<RoomAvailability[]>;
 }

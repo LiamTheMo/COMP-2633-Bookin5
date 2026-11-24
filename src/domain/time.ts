@@ -5,8 +5,9 @@ export const DAY_END = 24 * 60;
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-/** "14:30" -> 870. Throws on malformed input. */
+/** "14:30" -> 870. "24:00" -> 1440 (end of day, as formatHHMM renders it). Throws on malformed input. */
 export function parseHHMM(value: string): number {
+  if (value === "24:00") return DAY_END;
   const m = HHMM.exec(value);
   if (!m) throw new RangeError(`Invalid time "${value}", expected HH:mm`);
   return Number(m[1]) * 60 + Number(m[2]);

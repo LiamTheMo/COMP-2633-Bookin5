@@ -185,7 +185,7 @@ Whatever option we pick:
 
 - Every outgoing request is rate-limited and has a timeout (for example 10 seconds).
 - Responses are validated against a schema before any tool returns them.
-- We cache room lists and policy text for a short time (for example 10 minutes). We never cache availability for longer than a minute, because stale data causes double-bookings.
+- Availability and room details are never cached: each search is one live read of the library's search page, because stale data causes double-bookings.
 
 ---
 
@@ -460,10 +460,10 @@ Never commit `.env`, real session secrets, or recorded fixtures that contain per
 
 **Sprint 1 (done):** search service and LibCal library-site adapter, read-only.
 
-- `src/adapter/libcal/` reads MRU LibCal: the availability grid (`/spaces/availability/grid`) and room detail pages (`/space/{id}`). It skips rooms that are switched off or return a 404 page.
-- `src/search/` validates a request (slot alignment, duration, past times, horizon) and matches group rooms by capacity and free time. It returns `nextAvailable` times when nothing matches.
+- `src/adapter/libcal/` reads MRU LibCal's public space search page (`/spaces?m=t&lid=1140&date=…&start=…&end=…`) with one live GET per time window. The page lists every bookable room free for the window, with its id, name, grouping and capacity, plus LibCal's nearest alternatives. Rooms the library has switched off are not listed. Nothing is cached.
+- `src/search/` validates a request (slot alignment, duration, past times, horizon) and matches group rooms by exact capacity and free time. Optional filters: `category` (Group Rooms - 1st Floor, Group Rooms - 2nd & 3rd Floor, or Hybrid Group Rooms, any case) and `accessible`, `power`, `videoConferencing` (true means the room must have it). Features are read from each result's icons, and every returned room lists them. Each search also checks the same-length window at every 30-minute start in the following 2 hours (`lookaheadMinutes` in `src/search/policy.ts`), so up to 5 live requests per search. It always returns `nextAvailable`: other rooms closest to the requested start, never in the past and never a room already in `matches`.
 - No booking, cancellation or login is implemented yet. The MCP tool layer is the next sprint.
 
-**Assumptions to confirm with the library:** a grid slot with any `className` is taken and a slot without one is free (checked against the live search page for one room). The 120-minute maximum and 14-day horizon in `src/search/policy.ts` are placeholders. The grid and room pages are unofficial, so the adapter fails loudly with `LIBRARY_FORMAT_CHANGED` if their shape changes.
+**Assumptions to confirm with the library:** the 120-minute maximum and 14-day horizon in `src/search/policy.ts` are placeholders. The search page is not an official API, so the adapter fails loudly with `LIBRARY_FORMAT_CHANGED` if its markup changes. Its `capacity` filter only takes size bands (1 = 1–4, 2 = 5–6, 3 = 8–10), so the adapter requests all sizes and filters exact party size itself.
 
 Sprint 1 documentation (progress, requirement status, challenges, demo plan and the D2L post draft): [docs/sprint-1.md](docs/sprint-1.md).

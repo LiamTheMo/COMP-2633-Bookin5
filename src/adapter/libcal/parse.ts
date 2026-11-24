@@ -1,144 +1,81 @@
-import { z } from "zod";
-import { DAY_END, formatHHMM } from "../../domain/time.js";
-import type { FreeWindow, Room } from "../../domain/types.js";
+import { DAY_END } from "../../domain/time.js";
+import type { RoomAvailability } from "../../domain/types.js";
 import { LibraryFormatError } from "../../domain/errors.js";
 
 /*
- * Parsers for the two LibCal responses the adapter depends on.
+ * Parser for LibCal's server-rendered space search page:
+ *   GET /spaces?m=t&lid=...&date=...&start=HH:mm&end=HH:mm
  *
- * 1. POST /spaces/availability/grid  -> JSON list of 30-minute slots per room.
- *    Observed: a slot with a `className` is taken (seen: "s-lc-eq-checkout");
- *    a slot without one is free. Rooms with no slot for a time are not offered.
+ * The page lists one "booking suggestion" block per offer. Blocks inside
+ * #s-lc-eq-search-results are free for the whole requested window; blocks in
+ * #s-lc-eq-search-other-results are LibCal's nearest alternatives of the same
+ * duration. Each block's "Book Now" form carries the exact eid/start/end,
+ * and its icons (span titles) list the room's amenities.
+ * Rooms the library has switched off are not listed at all.
  *
- * 2. GET /space/{id}?date=...        -> HTML page with an embedded JS object
- *    that carries the room's title ("... (Capacity 5)"), grouping and id.
- *
- * Both formats are unofficial and can change. Failures raise LibraryFormatError
- * so the caller can report LIBRARY_FORMAT_CHANGED instead of guessing.
+ * The page is unofficial and can change. Anything unrecognised raises
+ * LibraryFormatError so the caller can report LIBRARY_FORMAT_CHANGED.
  */
 
-const GridSchema = z.object({
-  slots: z.array(
-    z.object({
-      start: z.string(),
-      end: z.string(),
-      itemId: z.number().int(),
-      className: z.string().optional(),
-    }),
-  ),
-});
+const RESULTS_MARKER = 'id="s-lc-eq-search-results"';
+const BLOCK_START = '<div class="media s-lc-booking-suggestion"';
 
-interface GridSlot {
-  date: string;
-  startMin: number;
-  endMin: number;
-  taken: boolean;
+/** Parses the search page into offered windows per room, for one date. */
+export function parseSearchPage(html: string, date: string): RoomAvailability[] {
+  const resultsAt = html.indexOf(RESULTS_MARKER);
+  if (resultsAt < 0) throw new LibraryFormatError("Search page has no results section");
+
+  const byRoom = new Map<number, RoomAvailability>();
+  for (const block of html.slice(resultsAt).split(BLOCK_START).slice(1)) {
+    const id = Number(field(block, /name="eid" value="(\d+)"/, "eid"));
+    const start = splitStamp(field(block, /name="start" value="([^"]+)"/, "start"), date);
+    const end = splitStamp(field(block, /name="end" value="([^"]+)"/, "end"), date);
+    if (start === null) continue; // an offer on another day
+    const entry = byRoom.get(id) ?? {
+      room: {
+        id,
+        name: text(field(block, /s-lc-suggestion-heading">\s*<a[^>]*>([\s\S]*?)<\/a>/, "name")),
+        grouping: text(field(block, /class="s-lc-booking-group">([\s\S]*?)<\/div>/, "grouping")),
+        capacity: Number(field(block, /title="The capacity of this space">[\s\S]*?<\/i>\s*(\d+)/, "capacity")),
+        features: {
+          accessible: block.includes('title="Accessible Seat/Space"'),
+          power: block.includes('title="Power Available"'),
+          videoConferencing: block.includes('title="Video Conferencing"'),
+        },
+      },
+      free: [],
+    };
+    entry.free.push({ start, end: end ?? DAY_END });
+    byRoom.set(id, entry);
+  }
+
+  const rooms = [...byRoom.values()];
+  for (const r of rooms) r.free.sort((a, b) => a.start - b.start);
+  return rooms;
 }
 
-/** Converts "2026-11-23 14:30:00" into { date, minutes }. */
-function splitStamp(stamp: string): { date: string; minutes: number } {
+function field(block: string, pattern: RegExp, label: string): string {
+  const m = pattern.exec(block);
+  if (!m) throw new LibraryFormatError(`Search result is missing its ${label}`);
+  return m[1]!;
+}
+
+/** "2026-11-24 14:30:00" -> 870, or null when the stamp is on another date (e.g. a midnight end). */
+function splitStamp(stamp: string, date: string): number | null {
   const m = /^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2}):\d{2}$/.exec(stamp);
-  if (!m) throw new LibraryFormatError(`Unexpected slot timestamp "${stamp}"`);
-  return { date: m[1]!, minutes: Number(m[2]) * 60 + Number(m[3]) };
+  if (!m) throw new LibraryFormatError(`Unexpected time "${stamp}"`);
+  return m[1] === date ? Number(m[2]) * 60 + Number(m[3]) : null;
 }
 
-/**
- * Groups grid slots by room for one date and merges back-to-back free slots
- * into FreeWindows. Slots that belong to other dates (the grid can include the
- * following midnight) are ignored; a slot that ends at midnight ends at 1440.
- */
-export function parseGrid(json: unknown, date: string): Map<number, FreeWindow[]> {
-  const parsed = GridSchema.safeParse(json);
-  if (!parsed.success) {
-    throw new LibraryFormatError(`Availability grid did not match expected shape: ${parsed.error.message}`);
-  }
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
-  const byRoom = new Map<number, GridSlot[]>();
-  for (const raw of parsed.data.slots) {
-    const start = splitStamp(raw.start);
-    if (start.date !== date) continue;
-    const end = splitStamp(raw.end);
-    const endMin = end.date === date ? end.minutes : DAY_END;
-    const list = byRoom.get(raw.itemId) ?? [];
-    list.push({
-      date,
-      startMin: start.minutes,
-      endMin,
-      taken: raw.className !== undefined,
-    });
-    byRoom.set(raw.itemId, list);
-  }
-
-  const result = new Map<number, FreeWindow[]>();
-  for (const [roomId, slots] of byRoom) {
-    slots.sort((a, b) => a.startMin - b.startMin);
-    const windows: FreeWindow[] = [];
-    for (const slot of slots) {
-      if (slot.taken) continue;
-      const last = windows[windows.length - 1];
-      if (last && last.end === slot.startMin) {
-        last.end = slot.endMin;
-      } else {
-        windows.push({ start: slot.startMin, end: slot.endMin });
-      }
-    }
-    result.set(roomId, windows);
-  }
-  return result;
-}
-
-const ROOM_TITLE = /id:\s*"eid_(\d+)",\s*title:\s*"((?:[^"\\]|\\.)*)"/;
-const GROUPING = /grouping:\s*"((?:[^"\\]|\\.)*)"/;
-const CAPACITY = /capacity:\s*(\d+)/;
-
-/** Decodes a JS string literal body (handles \uXXXX escapes). */
-function decodeJsString(raw: string): string {
-  try {
-    return JSON.parse(`"${raw}"`) as string;
-  } catch {
-    throw new LibraryFormatError("Could not decode a room title string");
-  }
-}
-
-/** LibCal's message for a room that is switched off. Such rooms cannot be booked. */
-const UNAVAILABLE_MESSAGE = "This resource is temporarily unavailable.";
-/** LibCal's "Whoops!" page for ids that are listed in the grid but have no detail page. */
-const NOT_FOUND_MARKER = 'id="errorcode"';
-
-/**
- * Extracts a room's id, name, grouping and capacity from its detail page.
- * Returns null for a room that cannot be booked through the site: switched off,
- * or listed in the grid but with no detail page (LibCal's 404 page).
- * Throws LibraryFormatError for any other page it does not recognise.
- */
-export function parseSpacePage(html: string, expectedId: number): Room | null {
-  const title = ROOM_TITLE.exec(html);
-  if (!title) {
-    if (html.includes(UNAVAILABLE_MESSAGE) || html.includes(NOT_FOUND_MARKER)) return null;
-    throw new LibraryFormatError(`Room page ${expectedId} has no room title object`);
-  }
-  const id = Number(title[1]);
-  if (id !== expectedId) {
-    throw new LibraryFormatError(`Room page for ${expectedId} describes room ${id}`);
-  }
-  // Grouping and capacity live in the same JS object, so search only nearby.
-  const object = html.slice(title.index, title.index + 800);
-  const grouping = GROUPING.exec(object);
-  const capacity = CAPACITY.exec(object);
-  if (!grouping || !capacity) {
-    throw new LibraryFormatError(`Room page ${expectedId} is missing grouping or capacity`);
-  }
-  const fullTitle = decodeJsString(title[2]!);
-  const name = fullTitle.replace(/\s*\(Capacity \d+\)\s*$/, "").trim();
-  return {
-    id,
-    name,
-    grouping: decodeJsString(grouping[1]!),
-    capacity: Number(capacity[1]),
-  };
-}
-
-/** Formats a window for logs and error messages, e.g. "15:00-16:00". */
-export function describeWindow(w: FreeWindow): string {
-  return `${formatHHMM(w.start)}-${formatHHMM(w.end)}`;
+/** Strips tags, decodes HTML entities and collapses whitespace. */
+function text(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, "")
+    .replace(/&(#\d+|#x[\da-f]+|\w+);/gi, (whole, e: string) =>
+      e[0] === "#" ? String.fromCodePoint(Number(e[1] === "x" ? `0${e.slice(1)}` : e.slice(1))) : (ENTITIES[e] ?? whole),
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }

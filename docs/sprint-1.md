@@ -29,11 +29,11 @@ The system is a TypeScript project (Node 22+) in this repository. The adapter re
 
 | Area | What works | Where |
 |---|---|---|
-| Library site adapter | Reads the availability grid for a date and each room's name, grouping and capacity. Skips rooms that are switched off or have no detail page. Rate-limited, time-limited requests. | `src/adapter/libcal/` |
-| Response parsing | Turns raw grid data into free time windows per room. Throws a clear error if the library's format changes. | `src/adapter/libcal/parse.ts` |
+| Library site adapter | Live reads of the library's space search page: rooms free for the window (name, grouping, capacity) plus the library's nearest alternatives. Switched-off rooms are not listed. No caching. Rate-limited, time-limited requests. | `src/adapter/libcal/` |
+| Response parsing | Turns the search page into rooms and offered time windows. Throws a clear error if the library's format changes. | `src/adapter/libcal/parse.ts` |
 | Request validation | Rejects bad dates, times off the 30-minute grid, durations out of range, past times, dates beyond the booking horizon, and invalid party sizes, before any library request. | `src/search/policy.ts` |
-| Search service | Finds group rooms that seat the party and are free for the whole window, smallest suitable room first. Pods are excluded. When nothing matches, it suggests the nearest times that fit. | `src/search/search-service.ts` |
-| Tests | 39 offline unit tests, plus 2 live read-only tests against the real site (`npm run test:live` with `LIVE=1`). | `test/` |
+| Search service | Finds group rooms that seat the party and are free for the whole window, smallest suitable room first. Pods are excluded. Optional filters for category (floor or hybrid) and for accessible, power and video-conferencing rooms. It also checks every start time in the 2 hours after the request and suggests the closest alternatives, never in the past. | `src/search/search-service.ts` |
+| Tests | 47 offline unit tests, plus 2 live read-only tests against the real site (`npm run test:live` with `LIVE=1`). | `test/` |
 
 ### Verified against the live site
 
@@ -72,7 +72,7 @@ None yet.
 
 **c) Nothing in the site's data says outright which slots are free.**
 - *Why it mattered:* the search would be wrong if the meaning was guessed incorrectly.
-- *What we did:* compared the grid output with the live search page for room 1-B. A slot with a class is taken and a slot without one is free. This is confirmed for one room only and remains an assumption to check across more rooms.
+- *What we did:* first we read the raw availability grid and inferred that a slot with a class is taken. That needed one extra request per room (45 in total) to get names and capacities and to spot switched-off rooms. We switched to the library's own search page, which answers a search in one request with exactly the rooms it would let a student book, so no inference or caching is needed.
 
 **d) Some listed rooms cannot be read.**
 - *Why it mattered:* one room returned an error page and another said "This resource is temporarily unavailable". The first version of the adapter failed the whole search when it hit either one.
@@ -98,7 +98,7 @@ Demo video: **not yet recorded.** The script below follows the required *Graphic
 2. **Code tour (1 min):** show the adapter (`src/adapter/libcal/`), the policy (`src/search/policy.ts`) and the search service (`src/search/search-service.ts`).
 3. **Live search (2 min):** run a search for a real date and party size against the live site, and show the matches and suggested times. Run `$env:LIVE = "1"; npm run test:live` to show the live checks passing.
 4. **Validation (1 min):** send an invalid request (for example 15:10 start) and show the policy message.
-5. **Tests (30 sec):** run `npm test` and show the 39 passing tests.
+5. **Tests (30 sec):** run `npm test` and show the 47 passing tests.
 6. **What's next (1 min):** explain R4–R7 and the booking-method question.
 
 **Gap to close before recording:** the course requires a graphical interface, and the current system has no interface beyond a terminal. Options: a minimal web page or a chat client connected to the MCP tools. This needs a decision before the demo is recorded.
@@ -125,7 +125,7 @@ Demo video: **not yet recorded.** The script below follows the required *Graphic
 - Library site adapter (reads room availability and details; handles switched-off rooms)
 - Request validation against library booking rules
 - Search service with matching by capacity and free time, plus suggested alternatives
-- 39 unit tests and 2 live read-only tests against the real site
+- 47 unit tests and 2 live read-only tests against the real site
 
 **Requirement progress update:**
 - R1 Find free group rooms: Complete (search side)
@@ -138,6 +138,6 @@ Demo video: **not yet recorded.** The script below follows the required *Graphic
 
 **New requirements added this sprint:** None yet.
 
-**Development challenges:** Node.js setup; the library rejects requests without the expected referrer header; availability meaning had to be inferred and checked against the live site; some rooms are switched off or return error pages, which the adapter now skips; a pacing bug and a wrong room count were caught by tests.
+**Development challenges:** Node.js setup; the library rejects requests without the expected referrer header; inferring availability from the raw grid was slow and fragile, so the adapter now reads the library's own search page in one request; a pacing bug and a wrong room count were caught by tests.
 
 **Sprint 1 demo video:** [link to be added after recording and testing in a private window]

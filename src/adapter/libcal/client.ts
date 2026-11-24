@@ -1,5 +1,4 @@
 import { LibraryUnavailableError } from "../../domain/errors.js";
-import { addDays } from "../../domain/time.js";
 
 export interface LibCalClientOptions {
   /** Site origin, e.g. https://librarycal.mtroyal.ca */
@@ -38,40 +37,24 @@ export class LibCalClient {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  /** Raw JSON of the availability grid for one date (all rooms at this location). */
-  async fetchGrid(date: string): Promise<unknown> {
-    const body = new URLSearchParams({
+  /**
+   * HTML of the space search page for one window: every bookable space free
+   * for [start, end), plus LibCal's nearest alternatives. `start`/`end` are
+   * HH:mm; an end of "24:00" means midnight. All groupings and sizes are
+   * requested (gid=0, capacity=0); filtering happens in the search service.
+   */
+  async fetchSearchPage(date: string, start: string, end: string): Promise<string> {
+    const query = new URLSearchParams({
+      m: "t",
       lid: String(this.options.locationId),
       gid: "0",
-      eid: "-1",
-      seat: "0",
-      seatId: "0",
-      zone: "0",
-      start: date,
-      end: addDays(date, 1),
-      pageIndex: "0",
-      pageSize: "18",
+      capacity: "0",
+      date,
+      "date-end": date,
+      start,
+      end,
     });
-    const text = await this.request(`${this.options.baseUrl}/spaces/availability/grid`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        // LibCal rejects grid requests that do not look like they come from its own search page.
-        Referer: `${this.options.baseUrl}/spaces?lid=${this.options.locationId}&date=${date}`,
-        Origin: this.options.baseUrl,
-      },
-      body: body.toString(),
-    });
-    try {
-      return JSON.parse(text) as unknown;
-    } catch (cause) {
-      throw new LibraryUnavailableError("Availability grid returned non-JSON content", { cause });
-    }
-  }
-
-  /** HTML of one room's detail page. */
-  async fetchRoomPage(roomId: number, date: string): Promise<string> {
-    return this.request(`${this.options.baseUrl}/space/${roomId}?date=${date}`, {
+    return this.request(`${this.options.baseUrl}/spaces?${query}`, {
       method: "GET",
       headers: { Accept: "text/html" },
     });
@@ -109,7 +92,7 @@ export class LibCalClient {
   private async pace(): Promise<void> {
     if (this.lastRequestAt !== undefined) {
       const wait = this.lastRequestAt + this.options.minIntervalMs - this.now();
-      if (wait > 0) await this.sleep(wait);
+      if (wait > 0) await this.sleep(Math.min(wait, this.options.minIntervalMs));
     }
     this.lastRequestAt = this.now();
   }

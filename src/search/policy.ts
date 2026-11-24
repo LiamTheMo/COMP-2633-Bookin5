@@ -1,4 +1,5 @@
 import { PolicyViolationError } from "../domain/errors.js";
+import type { RoomFeatures } from "../domain/types.js";
 import { addDays, formatHHMM, isValidIsoDate, localNow, parseHHMM, SLOT_MINUTES } from "../domain/time.js";
 
 /**
@@ -16,6 +17,10 @@ export interface SearchPolicy {
   maxDaysAhead: number;
   /** Only rooms whose grouping contains "group rooms" are searched. Pods are excluded. */
   groupRoomsOnly: boolean;
+  /** Each search also checks start times this many minutes past the requested start. */
+  lookaheadMinutes: number;
+  /** Categories a request may name: LibCal groupings, exactly as the site shows them. */
+  categories: string[];
 }
 
 export const DEFAULT_SEARCH_POLICY: SearchPolicy = {
@@ -24,6 +29,8 @@ export const DEFAULT_SEARCH_POLICY: SearchPolicy = {
   maxDurationMinutes: 120, // UNVERIFIED: confirm with the library
   maxDaysAhead: 14, // UNVERIFIED: confirm with the library
   groupRoomsOnly: true,
+  lookaheadMinutes: 120,
+  categories: ["Group Rooms - 1st Floor", "Group Rooms - 2nd & 3rd Floor", "Hybrid Group Rooms"],
 };
 
 export interface SearchRequest {
@@ -34,6 +41,12 @@ export interface SearchRequest {
   /** End time, HH:mm. */
   end: string;
   partySize: number;
+  /** Optional: only rooms in this category (one of policy.categories, any case). */
+  category?: string;
+  /** Optional feature filters: true means the room must have it; false or omitted means either. */
+  accessible?: boolean;
+  power?: boolean;
+  videoConferencing?: boolean;
 }
 
 export interface ValidatedRequest {
@@ -41,7 +54,13 @@ export interface ValidatedRequest {
   startMin: number;
   endMin: number;
   partySize: number;
+  /** The canonical category name, or undefined for any. */
+  category: string | undefined;
+  /** Features every returned room must have. */
+  needs: (keyof RoomFeatures)[];
 }
+
+const FEATURES = ["accessible", "power", "videoConferencing"] as const;
 
 /**
  * Validates a search request. Throws PolicyViolationError with a message the
@@ -90,7 +109,23 @@ export function validateSearch(req: SearchRequest, policy: SearchPolicy, now: Da
     throw new PolicyViolationError(`${formatHHMM(startMin)} has already passed today.`);
   }
 
-  return { date: req.date, startMin, endMin, partySize: req.partySize };
+  let category: string | undefined;
+  if (req.category !== undefined) {
+    category = policy.categories.find((c) => c.toLowerCase() === String(req.category).trim().toLowerCase());
+    if (!category) {
+      throw new PolicyViolationError(`Unknown category "${req.category}". Choose one of: ${policy.categories.join(", ")}.`);
+    }
+  }
+
+  const needs = FEATURES.filter((f) => {
+    const value = req[f];
+    if (value !== undefined && typeof value !== "boolean") {
+      throw new PolicyViolationError(`${f} must be true or false.`);
+    }
+    return value === true;
+  });
+
+  return { date: req.date, startMin, endMin, partySize: req.partySize, category, needs };
 }
 
 function safeParseTime(value: string, label: string): number {
