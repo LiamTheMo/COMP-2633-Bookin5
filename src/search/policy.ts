@@ -5,9 +5,9 @@ import { addDays, formatHHMM, isValidIsoDate, localNow, parseHHMM, SLOT_MINUTES 
 /**
  * Booking rules the search enforces before any request reaches the library.
  *
- * Only the slot size is confirmed on the library site. The duration cap and the
- * booking horizon are placeholders until the library confirms them (see the
- * README open questions); they are kept here so changing them is one edit.
+ * Only the slot size is confirmed on the library site. The booking horizon is
+ * set by NFR6 (7 days). The duration cap is a placeholder until the library
+ * confirms it; it is kept here so changing it is one edit.
  */
 export interface SearchPolicy {
   slotMinutes: number;
@@ -27,7 +27,7 @@ export const DEFAULT_SEARCH_POLICY: SearchPolicy = {
   slotMinutes: SLOT_MINUTES,
   minDurationMinutes: 30,
   maxDurationMinutes: 120, // UNVERIFIED: confirm with the library
-  maxDaysAhead: 14, // UNVERIFIED: confirm with the library
+  maxDaysAhead: 7, // NFR6: queries only up to 7 days ahead
   groupRoomsOnly: true,
   lookaheadMinutes: 120,
   categories: ["Group Rooms - 1st Floor", "Group Rooms - 2nd & 3rd Floor", "Hybrid Group Rooms"],

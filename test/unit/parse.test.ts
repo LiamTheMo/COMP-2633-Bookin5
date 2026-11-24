@@ -4,7 +4,7 @@ import { parseSearchPage } from "../../src/adapter/libcal/parse.js";
 import { LibraryFormatError } from "../../src/domain/errors.js";
 
 // Captured from the live search page for Tuesday 2026-11-24.
-// 14:00-15:00: three pods free for the whole window, plus "next available" alternatives.
+// 14:00-15:00: one pod (Pod 8) free for the whole window, plus "next available" alternatives.
 const afternoon = readFileSync(new URL("../fixtures/search-2026-11-24-1400.html", import.meta.url), "utf8");
 // 20:00-21:00: "best matches" only, no alternatives section.
 const evening = readFileSync(new URL("../fixtures/search-2026-11-24-2000.html", import.meta.url), "utf8");
@@ -14,28 +14,36 @@ const DATE = "2026-11-24";
 describe("parseSearchPage", () => {
   it("reads room details and the offered window from each result", () => {
     const rooms = parseSearchPage(afternoon, DATE);
-    expect(rooms.find((r) => r.room.id === 7572)).toEqual({
+    expect(rooms.find((r) => r.room.id === 7586)).toEqual({
       room: {
-        id: 7572,
-        name: "2-C group room (2nd floor, EL2145)",
+        id: 7586,
+        name: "2-Q group room (2nd floor, EL2407)",
         grouping: "Group Rooms - 2nd & 3rd Floor",
         capacity: 5,
         features: { accessible: false, power: true, videoConferencing: false },
       },
-      free: [{ start: 870, end: 930 }], // next available 14:30-15:30
+      free: [{ start: 960, end: 1020 }], // next available 16:00-17:00
     });
   });
 
   it("reads amenities from the result icons", () => {
-    const hybrid = parseSearchPage(afternoon, DATE).find((r) => r.room.id === 7577)!;
-    expect(hybrid.room.features).toEqual({ accessible: true, power: true, videoConferencing: true });
+    const rooms = parseSearchPage(afternoon, DATE);
+    expect(rooms.find((r) => r.room.id === 33379)!.room.features).toEqual({ accessible: true, power: true, videoConferencing: false });
+    expect(rooms.find((r) => r.room.id === 35064)!.room.features).toEqual({ accessible: false, power: false, videoConferencing: false });
+    // No video-conferencing room was free in the capture, so swap one icon title in.
+    const vc = afternoon.replaceAll('title="Accessible Seat/Space"', 'title="Video Conferencing"');
+    expect(parseSearchPage(vc, DATE).find((r) => r.room.id === 33379)!.room.features).toEqual({
+      accessible: false,
+      power: true,
+      videoConferencing: true,
+    });
   });
 
   it("includes both full matches and alternatives", () => {
     const rooms = parseSearchPage(afternoon, DATE);
-    const pod7 = rooms.find((r) => r.room.id === 33311)!;
-    expect(pod7.room).toMatchObject({ name: "Pod 7", grouping: "Individual Study Pods", capacity: 1 });
-    expect(pod7.free).toEqual([{ start: 840, end: 900 }]);
+    const pod8 = rooms.find((r) => r.room.id === 33317)!;
+    expect(pod8.room).toMatchObject({ name: "Pod 8", grouping: "Individual Study Pods", capacity: 1 });
+    expect(pod8.free).toEqual([{ start: 840, end: 900 }]);
     expect(rooms.length).toBeGreaterThan(3);
   });
 
@@ -60,7 +68,7 @@ describe("parseSearchPage", () => {
     const html = afternoon
       .replaceAll('value="2026-11-24 14:00:00"', 'value="2026-11-24 23:00:00"')
       .replaceAll('value="2026-11-24 15:00:00"', 'value="2026-11-25 00:00:00"');
-    expect(parseSearchPage(html, DATE).find((r) => r.room.id === 33311)!.free).toEqual([{ start: 1380, end: 1440 }]);
+    expect(parseSearchPage(html, DATE).find((r) => r.room.id === 33317)!.free).toEqual([{ start: 1380, end: 1440 }]);
   });
 
   it("returns no rooms when the results section is empty", () => {

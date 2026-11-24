@@ -128,16 +128,16 @@ describe("LibCalRoomSource", () => {
     expect(f.calls).toHaveLength(2);
     expect(new URL(f.calls[0]!.url).searchParams.get("start")).toBe("14:00");
     expect(new URL(f.calls[0]!.url).searchParams.get("end")).toBe("15:00");
-    expect(rooms.find((r) => r.room.id === 7572)?.free).toEqual([{ start: 870, end: 930 }]);
+    expect(rooms.find((r) => r.room.id === 7586)?.free).toEqual([{ start: 960, end: 1020 }]);
   });
 
-  it("drives the search service end to end: only pods free at 14:00, so it suggests 2-C at 14:30", async () => {
+  it("drives the search service end to end: only a pod is free at 14:00, so it suggests 2-Q at 16:00", async () => {
     const f = fakeFetch(() => new Response(searchHtml, { status: 200 }));
     const source = new LibCalRoomSource(new LibCalClient(options, f.fetch, noSleep, () => 0));
     const search = new SearchService(source, undefined, () => new Date("2026-11-24T15:00:00Z")); // morning in Edmonton
     const result = await search.findRooms({ date: "2026-11-24", start: "14:00", end: "15:00", partySize: 3 });
 
     expect(result.matches).toEqual([]);
-    expect(result.nextAvailable[0]).toMatchObject({ room: { id: 7572 }, start: "14:30", end: "15:30" });
+    expect(result.nextAvailable[0]).toMatchObject({ room: { id: 7586 }, start: "16:00", end: "17:00" });
   });
 });

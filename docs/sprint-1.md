@@ -1,6 +1,6 @@
 # Sprint 1 — Bus Error
 
-**Project:** MRU library group-room booking through an AI chat assistant (MCP server)
+**Project:** MCP server that lets an AI assistant find MRU Library study rooms and open the Book Now page
 **Sprint window:** November 23 – November 29 (due Sunday, November 29, 11:59 PM)
 **Weight:** 3% of course grade (internal marks: 10)
 
@@ -13,13 +13,19 @@
 | Robel A | Developer / Project Coordinator |
 | Harper K | Security Engineer / Project Coordinator / Project Manager |
 
+---|---|
+| Liam K | Developer / Project Coordinator |
+| Liam M | Developer / Project Coordinator |
+| Robel A | Developer / Project Coordinator |
+| Harper K | Security Engineer / Project Coordinator / Project Manager |
+
 ---
 
 ## 1. Sprint 1 goal
 
-Move from the Week 1 plan to a working first version. Sprint 1 covers the **search service** and the **library site adapter**, which together let the system find real, free MRU group rooms for a given date, time and party size.
+Move from the Week 1 plan to a working first version. Sprint 1 covers the **search service** and the **library site adapter**, the two bottom layers of the Week 1 architecture. Together they let the system find real, free MRU group rooms for a given date, time and group size.
 
-Booking, cancellation, sign-in and the chat interface are planned for later sprints.
+We scoped Sprint 1 to these two layers on purpose: they carry the biggest risk (how the library site returns its data), and everything above them depends on them. The MCP tool layer, opening the Book Now page (FR4) and the settings file (FR10) are planned for later sprints.
 
 ## 2. Development progress summary
 
@@ -33,7 +39,7 @@ The system is a TypeScript project (Node 22+) in this repository. The adapter re
 | Response parsing | Turns the search page into rooms and offered time windows. Throws a clear error if the library's format changes. | `src/adapter/libcal/parse.ts` |
 | Request validation | Rejects bad dates, times off the 30-minute grid, durations out of range, past times, dates beyond the booking horizon, and invalid party sizes, before any library request. | `src/search/policy.ts` |
 | Search service | Finds group rooms that seat the party and are free for the whole window, smallest suitable room first. Pods are excluded. Optional filters for category (floor or hybrid) and for accessible, power and video-conferencing rooms. It also checks every start time in the 2 hours after the request and suggests the closest alternatives, never in the past. | `src/search/search-service.ts` |
-| Tests | 47 offline unit tests, plus 2 live read-only tests against the real site (`npm run test:live` with `LIVE=1`). | `test/` |
+| Tests | 48 offline unit tests, plus 2 live read-only tests against the real site (`npm run test:live` with `LIVE=1`). | `test/` |
 
 ### Verified against the live site
 
@@ -42,23 +48,32 @@ The system is a TypeScript project (Node 22+) in this repository. The adapter re
 
 ## 3. Requirement progress
 
-> **Note:** The official Week 1 requirement list was not in the repository. The rows below use the goals from the project README and must be matched to the Week 1 IDs before submission.
+IDs match the Week 1 System Analysis & Planning document.
 
-| ID | Requirement | Status | Notes |
-|---|---|---|---|
-| R1 | Find free group rooms by date, time and party size | **Complete** (search side) | Validated, matched, suggests alternatives. Verified against the live site. |
-| R2 | Show which group rooms exist (name, capacity, location) | **Complete** (read side) | Adapter reads name, grouping and capacity. |
-| R3 | Enforce library booking rules before contacting the library | **In progress** | Slot size, duration, past times and party size are enforced. The 120-minute maximum and 14-day horizon are placeholders until the library confirms them. |
-| R4 | Book a room with a confirmation step | **Not started** | Next sprint. Needs the booking method decided (see open questions). |
-| R5 | View and cancel my bookings | **Not started** | Next sprint. |
-| R6 | Student sign-in via MyMRU, with no password stored by the system | **Not started** | Design is in the README (§7). Mechanism still to confirm with the library. |
-| R7 | Conversational interface through an MCP chat client | **Not started** | The MCP tool layer is the next build step. |
+| ID | Requirement | Priority / Size | Status | Notes |
+|---|---|---|---|---|
+| FR1 | List bookable rooms with name, location and capacity | Must / S | **In progress** | The adapter reads name, grouping (floor) and capacity. The `list_rooms` MCP tool is not built yet. |
+| FR2 | Show a room's free time slots for a date | Must / M | **In progress** | The adapter returns free windows per room for a time window. The `get_availability` tool and full-day view are not built yet. |
+| FR3 | Search all rooms by date, window, duration and group size | Must / M | **Complete** (service layer) | Capacity ≥ group size and free for the whole window. Verified against the live site. Not yet exposed as an MCP tool. |
+| FR4 | Open the chosen room's Book Now page in the browser | Must / M | **Not started** | Sprint 2. |
+| FR5 | Rank results best match first | Should / S | **Complete** | Smallest suitable capacity first; alternatives sorted by closeness to the requested start. |
+| FR6 | Suggest nearest free alternatives | Should / S | **Complete** | Scans the 2 hours after the request; returns up to 5 alternatives (plan said 3), never in the past. |
+| FR7 | Check library booking rules first | Should / M | **In progress** | 30-minute grid, min/max duration, past times, group size and the 7-day horizon (NFR6) are enforced. The 120-minute maximum is a placeholder until the library confirms it. |
+| FR8 | Next free slot for a specific room | Could / S | **Not started** | |
+| FR9 | Filter rooms by features | Could / S | **Complete** (pulled forward) | Accessible, power and video-conferencing filters, plus floor/hybrid category. The search page already lists features, so it cost very little. |
+| FR10 | Save default group size and favourite rooms | Could / S | **Not started** | |
 
-**Next to build (Sprint 2 priority):** wire R1 and R2 into MCP tools so a chat client can call them, then start R4 (booking) with a confirmation step.
+| ID | Non-functional requirement | Status |
+|---|---|---|
+| NFR3 | Clear errors when the site is down or changes | **In progress**: the client and parser throw clear `LibraryUnavailableError` / `LibraryFormatError` messages. To be checked through the tools once they exist. |
+| NFR4 | Never ask for, store or send MRU credentials | **Met so far**: the adapter is read-only and never signs in. |
+| NFR6 | Only allow queries up to 7 days ahead | **Complete**: enforced in `src/search/policy.ts`, tested at both edges. |
+
+**Next to build (Sprint 2):** the MCP tool layer (`list_rooms`, `get_availability`, `search_rooms`) and FR4 `open_booking_page`, so the system can be used from Claude Desktop and the MCP Inspector.
 
 ### New requirements added this sprint
 
-None yet.
+None. FR9 (a Could-Have) was pulled forward rather than added.
 
 ## 4. Development challenges
 
@@ -86,9 +101,13 @@ None yet.
 - *Why it mattered:* the adapter waited before its first request, which is wasteful and was caught only by a test.
 - *What we did:* fixed the rate limiter so the wait applies only between requests.
 
-**g) Booking method is still unknown.**
-- *Why it matters:* booking (R4) depends on whether the library offers a student-scoped API or whether we must drive the web flow. The library has not been asked yet.
-- *What we are doing:* listed as the first open question in the README; to be raised with the library.
+**g) Booking through our system would mean handling student credentials.**
+- *Why it mattered:* the library offers no student booking API, and driving the sign-in flow ourselves would break NFR4.
+- *What we did:* kept booking on the library site. FR4 opens the room's Book Now page in the student's own browser, where they sign in and finish the booking.
+
+**h) The new test fixtures were never committed.**
+- *Why it mattered:* after switching to the search page, the captured pages the tests read were left out of the commit, so `npm test` failed on `main`.
+- *What we did:* recaptured the search pages from the live site for 24 November, pointed the fixture-specific assertions at rooms in the new capture, and committed the fixtures.
 
 ## 5. Sprint 1 demo plan
 
@@ -98,17 +117,15 @@ Demo video: **not yet recorded.** The script below follows the required *Graphic
 2. **Code tour (1 min):** show the adapter (`src/adapter/libcal/`), the policy (`src/search/policy.ts`) and the search service (`src/search/search-service.ts`).
 3. **Live search (2 min):** run a search for a real date and party size against the live site, and show the matches and suggested times. Run `$env:LIVE = "1"; npm run test:live` to show the live checks passing.
 4. **Validation (1 min):** send an invalid request (for example 15:10 start) and show the policy message.
-5. **Tests (30 sec):** run `npm test` and show the 47 passing tests.
-6. **What's next (1 min):** explain R4–R7 and the booking-method question.
+5. **Tests (30 sec):** run `npm test` and show the 48 passing tests.
+6. **What's next (1 min):** explain FR4 and the MCP tool layer for Sprint 2.
 
 **Gap to close before recording:** the course requires a graphical interface, and the current system has no interface beyond a terminal. Options: a minimal web page or a chat client connected to the MCP tools. This needs a decision before the demo is recorded.
 
 ## 6. Open questions
 
-1. Can a student book through the library's API, or only through the web flow? (Blocks R4.)
-2. What are the library's real limits: maximum duration, booking horizon, per-student limit?
-3. Is there a permitted way to sign students in without the system ever seeing a password? (Blocks R6.)
-4. Which chat client and interface will the demo use?
+1. What are the library's real limits: maximum duration and per-student limit?
+2. Which interface will the demo use: Claude Desktop or the MCP Inspector?
 
 ---
 
@@ -117,27 +134,32 @@ Demo video: **not yet recorded.** The script below follows the required *Graphic
 **Hackathon #2 – Week 2: Sprint 1 Development Update**
 
 **Team Name:** Bus Error
-**Team Members:** Liam K, Liam M, Robel A, Harper K
 
-**Development progress summary:** We built the search service and the MRU library site adapter in TypeScript. The system reads real group-room availability from the library's booking site and returns free rooms for a date, time and party size. It is read-only; booking is next sprint.
+**Team Members:** Liam K (Developer / Project Coordinator), Liam M (Developer / Project Coordinator), Robel A (Developer / Project Coordinator), Harper K (Security Engineer / Project Coordinator / Project Manager)
 
-**Features implemented so far:**
-- Library site adapter (reads room availability and details; handles switched-off rooms)
-- Request validation against library booking rules
-- Search service with matching by capacity and free time, plus suggested alternatives
-- 47 unit tests and 2 live read-only tests against the real site
+**Development Progress Summary:** For Sprint 1 we deliberately built the two bottom layers of our Week 1 architecture: the library site adapter and the search service. These carry our biggest risk, and the tool layer, browser hand-off and settings file all depend on them. The system reads live room availability from the MRU booking site and returns free group rooms for a date, time window and group size. It is read-only and never handles credentials.
 
-**Requirement progress update:**
-- R1 Find free group rooms: Complete (search side)
-- R2 Show group rooms: Complete (read side)
-- R3 Enforce booking rules: In progress (some limits still to confirm)
-- R4 Book with confirmation: Not started (next sprint)
-- R5 View and cancel bookings: Not started
-- R6 MyMRU sign-in: Not started
-- R7 Chat interface via MCP: Not started
+**Features Implemented So Far:**
+- Library site adapter: live, rate-limited, time-limited reads of the booking site's search page (rooms, floor, capacity, features, free windows)
+- Parser that fails with a clear error if the site's format changes
+- Booking-rule validation (30-minute grid, duration, past times, group size, 7-day horizon)
+- Search service: matching by capacity and free time, best-fit ranking, nearest alternatives, feature and floor filters
+- 48 unit tests and 2 live read-only tests against the real site
 
-**New requirements added this sprint:** None yet.
+**Requirement Progress Update:**
+- FR1 List rooms: In progress (adapter done; tool next)
+- FR2 Room availability: In progress (adapter done; tool next)
+- FR3 Search rooms: Complete (service layer)
+- FR4 Open Book Now page: Not started (Sprint 2)
+- FR5 Rank results: Complete
+- FR6 Nearest alternatives: Complete
+- FR7 Booking rules: In progress (max duration to confirm)
+- FR8 Next free slot: Not started
+- FR9 Feature filters: Complete (pulled forward)
+- FR10 Saved settings: Not started
 
-**Development challenges:** Node.js setup; the library rejects requests without the expected referrer header; inferring availability from the raw grid was slow and fragile, so the adapter now reads the library's own search page in one request; a pacing bug and a wrong room count were caught by tests.
+**New Requirements Added During This Sprint:** None.
 
-**Sprint 1 demo video:** [link to be added after recording and testing in a private window]
+**Development Challenges:** The site rejected requests without the expected referrer headers; the raw availability grid did not say which slots were free and needed 45 requests, so we switched to the library's own search page (one request); some rooms return error pages and are now skipped; a wrong room-count estimate and a rate-limiter bug were caught by tests; test fixtures were left out of a commit and had to be recaptured.
+
+**Sprint 1 Demo Video:** [link to be added after recording; test in a private window with "Anyone with the link can view"]

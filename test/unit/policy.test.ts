@@ -85,7 +85,11 @@ describe("validateSearch", () => {
   });
 
   it("rejects a date beyond the booking horizon", () => {
-    rejects({ date: "2026-12-10" }, /up to 14 days ahead/);
+    rejects({ date: "2026-12-01" }, /up to 7 days ahead/);
+  });
+
+  it("accepts the last day of the 7-day horizon (NFR6)", () => {
+    expect(validateSearch({ ...base, date: "2026-11-30" }, DEFAULT_SEARCH_POLICY, NOW).date).toBe("2026-11-30");
   });
 
   it("rejects a start time that has already passed today", () => {
