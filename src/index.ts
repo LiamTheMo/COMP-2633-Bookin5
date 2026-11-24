@@ -1,0 +1,11 @@
+export * from "./domain/types.js";
+export * from "./domain/errors.js";
+export * from "./domain/time.js";
+export { LibCalClient, DEFAULT_LIBCAL_OPTIONS } from "./adapter/libcal/client.js";
+export type { LibCalClientOptions, FetchLike } from "./adapter/libcal/client.js";
+export { LibCalRoomSource } from "./adapter/libcal/libcal-room-source.js";
+export { parseGrid, parseSpacePage } from "./adapter/libcal/parse.js";
+export { SearchService, isGroupRoom } from "./search/search-service.js";
+export type { RoomOffer, SearchResult } from "./search/search-service.js";
+export { DEFAULT_SEARCH_POLICY, validateSearch } from "./search/policy.js";
+export type { SearchPolicy, SearchRequest } from "./search/policy.js";
