@@ -29,7 +29,7 @@ We scoped Sprint 1 to these two layers on purpose: they carry the biggest risk (
 
 ## 2. Development progress summary
 
-The system is a TypeScript project (Node 22+) in this repository. The adapter reads MRU's room-booking site (LibCal) and the search service turns that data into search results.
+The system is a TypeScript project (Node 20+, per NFR5) in this repository. The adapter reads MRU's room-booking site (LibCal) and the search service turns that data into search results.
 
 ### Features implemented
 
@@ -57,7 +57,7 @@ IDs match the Week 1 System Analysis & Planning document.
 | FR3 | Search all rooms by date, window, duration and group size | Must / M | **Complete** (service layer) | Capacity ≥ group size and free for the whole window. Verified against the live site. Not yet exposed as an MCP tool. |
 | FR4 | Open the chosen room's Book Now page in the browser | Must / M | **Not started** | Sprint 2. |
 | FR5 | Rank results best match first | Should / S | **Complete** | Smallest suitable capacity first; alternatives sorted by closeness to the requested start. |
-| FR6 | Suggest nearest free alternatives | Should / S | **Complete** | Scans the 2 hours after the request; returns up to 5 alternatives (plan said 3), never in the past. |
+| FR6 | Suggest nearest free alternatives | Should / S | **Complete** | Scans the 2 hours after the request; returns up to 5 alternatives, closest first, never in the past. |
 | FR7 | Check library booking rules first | Should / M | **In progress** | 30-minute grid, min/max duration, past times, group size and the 7-day horizon (NFR6) are enforced. The 120-minute maximum is a placeholder until the library confirms it. |
 | FR8 | Next free slot for a specific room | Could / S | **Not started** | |
 | FR9 | Filter rooms by features | Could / S | **Complete** (pulled forward) | Accessible, power and video-conferencing filters, plus floor/hybrid category. The search page already lists features, so it cost very little. |
@@ -79,7 +79,7 @@ None. FR9 (a Could-Have) was pulled forward rather than added.
 
 **a) Node.js was not installed on the development machine.**
 - *Why it mattered:* nothing could be built or tested until it was.
-- *What we did:* installed Node 26 with winget. The project targets Node 22 or newer.
+- *What we did:* installed Node 26 with winget. The project targets Node 20 or newer (NFR5), and the tests pass on Node 20 and 26.
 
 **b) The library's availability endpoint rejects requests that don't look like they came from its own page.**
 - *Why it mattered:* the first requests returned "Invalid Referrer" and no data.

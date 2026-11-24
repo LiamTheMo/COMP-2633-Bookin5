@@ -219,7 +219,7 @@ A student running the server on their own machine signs in once through a local 
 
 | Area | Choice | Why |
 |---|---|---|
-| Language | **TypeScript on Node.js 22 LTS** | Official MCP SDK support, good typing for the structured tool schemas, strong Playwright support if we need browser automation. |
+| Language | **TypeScript on Node.js 20+** | Official MCP SDK support, good typing for the structured tool schemas, strong Playwright support if we need browser automation. |
 | MCP SDK | `@modelcontextprotocol/sdk` | Official SDK; supports stdio and Streamable HTTP transports. |
 | Schema validation | `zod` | Shared between tool input schemas and runtime validation. |
 | HTTP client | Built-in `fetch` with timeouts | No extra dependency for simple REST calls. |
@@ -429,7 +429,7 @@ These must be answered before the milestone that depends on them.
 
 ## 17. Getting started (developers)
 
-Prerequisites: Node.js 22 or newer and npm. The MCP server itself is not built yet (see Status).
+Prerequisites: Node.js 20 or newer and npm. The MCP server itself is not built yet (see Status).
 
 ```powershell
 # Install dependencies
