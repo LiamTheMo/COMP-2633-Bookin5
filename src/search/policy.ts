@@ -36,10 +36,12 @@ export const DEFAULT_SEARCH_POLICY: SearchPolicy = {
 export interface SearchRequest {
   /** ISO date, YYYY-MM-DD, in the library's local timezone. */
   date: string;
-  /** Start time, HH:mm. */
+  /** Start time, HH:mm. With durationMinutes, the earliest start. */
   start: string;
-  /** End time, HH:mm. */
+  /** End time, HH:mm. With durationMinutes, the latest end. */
   end: string;
+  /** Optional booking length. Omitted means the booking is the whole start-end window. */
+  durationMinutes?: number;
   partySize: number;
   /** Optional: only rooms in this category (one of policy.categories, any case). */
   category?: string;
@@ -51,8 +53,11 @@ export interface SearchRequest {
 
 export interface ValidatedRequest {
   date: string;
+  /** The window the booking must fit in. */
   startMin: number;
   endMin: number;
+  /** Booking length; equals endMin - startMin when no duration was given. */
+  durationMin: number;
   partySize: number;
   /** The canonical category name, or undefined for any. */
   category: string | undefined;
@@ -87,9 +92,15 @@ export function validateSearch(req: SearchRequest, policy: SearchPolicy, now: Da
     }
   }
 
-  const duration = endMin - startMin;
-  if (duration <= 0) {
+  if (endMin <= startMin) {
     throw new PolicyViolationError("The end time must be after the start time.");
+  }
+  const duration = req.durationMinutes ?? endMin - startMin;
+  if (!Number.isInteger(duration) || duration % policy.slotMinutes !== 0) {
+    throw new PolicyViolationError(`The duration must be a whole number of ${policy.slotMinutes}-minute slots.`);
+  }
+  if (duration > endMin - startMin) {
+    throw new PolicyViolationError(`A ${duration}-minute booking does not fit between ${req.start} and ${req.end}.`);
   }
   if (duration < policy.minDurationMinutes) {
     throw new PolicyViolationError(`Bookings must be at least ${policy.minDurationMinutes} minutes long.`);
@@ -125,7 +136,7 @@ export function validateSearch(req: SearchRequest, policy: SearchPolicy, now: Da
     return value === true;
   });
 
-  return { date: req.date, startMin, endMin, partySize: req.partySize, category, needs };
+  return { date: req.date, startMin, endMin, durationMin: duration, partySize: req.partySize, category, needs };
 }
 
 function safeParseTime(value: string, label: string): number {

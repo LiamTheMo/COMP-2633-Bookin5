@@ -66,6 +66,39 @@ describe("SearchService.findRooms", () => {
     expect(result.nextAvailable.map((o) => [o.start, o.room.id])).toEqual([["16:00", 5]]);
   });
 
+  it("finds a free gap of the duration inside a wider window, earliest start first (FR3, FR5)", async () => {
+    // Week 1 example: "4 people, 1-5 pm, 2 h" (party of 3 here so room 1 qualifies by size).
+    const result = await serviceWith(fixtures).findRooms({
+      date: "2026-11-23",
+      start: "13:00",
+      end: "17:00",
+      durationMinutes: 120,
+      partySize: 3,
+    });
+    // Room 1 only has a 1 h gap in the window; room 2 fits from 14:00, room 3 from 15:00.
+    expect(result.matches.map((m) => [m.room.id, m.start, m.end])).toEqual([
+      [2, "14:00", "16:00"],
+      [3, "15:00", "17:00"],
+    ]);
+    // Room 1's 20:00 gap is outside the window, so it is an alternative.
+    expect(result.nextAvailable.map((o) => [o.room.id, o.start, o.end])).toEqual([[1, "20:00", "22:00"]]);
+  });
+
+  it("queries a booking-length window at every start in the window, then two hours past it", async () => {
+    const calls: [number, number][] = [];
+    const source: RoomSource = {
+      getAvailability: async (_date, start, end) => {
+        calls.push([start, end]);
+        return [];
+      },
+    };
+    const service = new SearchService(source, undefined, () => NOW);
+    await service.findRooms({ date: "2026-11-23", start: "13:00", end: "17:00", durationMinutes: 120, partySize: 2 });
+    // Starts 13:00..15:00 fit the window; 15:30..17:00 are the look-ahead.
+    expect(calls.map(([s]) => s)).toEqual([780, 810, 840, 870, 900, 930, 960, 990, 1020]);
+    expect(calls.every(([s, e]) => e - s === 120)).toBe(true);
+  });
+
   it("also queries the same-length window at every slot in the next two hours", async () => {
     const calls: [number, number][] = [];
     const source: RoomSource = {

@@ -1,5 +1,5 @@
 import { DAY_END, formatHHMM, localNow, parseHHMM } from "../domain/time.js";
-import type { FreeWindow, Room, RoomAvailability, RoomSource } from "../domain/types.js";
+import type { Room, RoomAvailability, RoomSource } from "../domain/types.js";
 import { DEFAULT_SEARCH_POLICY, SearchPolicy, SearchRequest, validateSearch } from "./policy.js";
 
 export interface RoomOffer {
@@ -13,7 +13,10 @@ export interface RoomOffer {
 export interface SearchResult {
   date: string;
   partySize: number;
-  /** Rooms free for the whole requested window, smallest suitable capacity first. */
+  /**
+   * Rooms with a free gap of the booking length inside the requested window, at
+   * the earliest such start; earliest start first, then smallest suitable capacity.
+   */
   matches: RoomOffer[];
   /**
    * Other rooms and times on the same date, closest to the requested start
@@ -42,26 +45,34 @@ export class SearchService {
 
   async findRooms(req: SearchRequest): Promise<SearchResult> {
     const valid = validateSearch(req, this.policy, this.clock());
-    const duration = valid.endMin - valid.startMin;
+    const duration = valid.durationMin;
+    const latestStart = valid.endMin - duration; // equals startMin when the booking is the whole window
 
-    const eligible = (await this.lookAhead(valid.date, valid.startMin, duration))
+    const eligible = (await this.lookAhead(valid.date, valid.startMin, latestStart, duration))
       .filter((a) => !this.policy.groupRoomsOnly || isGroupRoom(a.room))
       .filter((a) => a.room.capacity >= valid.partySize)
       .filter((a) => valid.category === undefined || a.room.grouping === valid.category)
       .filter((a) => valid.needs.every((f) => a.room.features[f]))
       .sort((a, b) => a.room.capacity - b.room.capacity || a.room.id - b.room.id);
 
+    const slot = this.policy.slotMinutes;
     const matches: RoomOffer[] = [];
     for (const { room, free } of eligible) {
-      if (free.some((w) => covers(w, valid.startMin, valid.endMin))) {
-        matches.push(offer(room, valid.startMin, valid.endMin));
+      // Earliest slot-aligned start in the window with a free gap of `duration`.
+      const starts = free
+        .map((w) => Math.ceil(Math.max(w.start, valid.startMin) / slot) * slot)
+        .filter((s, i) => s <= latestStart && s + duration <= free[i]!.end);
+      if (starts.length > 0) {
+        const s = Math.min(...starts);
+        matches.push(offer(room, s, s + duration));
       }
     }
+    // Stable sort: rooms are already smallest capacity first, so ties keep that order.
+    matches.sort((a, b) => a.start.localeCompare(b.start));
 
     const nextAvailable: RoomOffer[] = [];
     // Never suggest a time that has already passed today.
     const today = localNow(this.clock());
-    const slot = this.policy.slotMinutes;
     const notBefore = valid.date === today.date ? Math.ceil(today.minutes / slot) * slot : 0;
     const matched = new Set(matches.map((m) => m.room.id));
     const candidates: RoomOffer[] = [];
@@ -76,7 +87,11 @@ export class SearchService {
         candidates.push(offer(room, start, start + duration));
       }
     }
-    const distance = (o: RoomOffer) => Math.abs(parseHHMM(o.start) - valid.startMin);
+    // Distance from the window of allowed starts [startMin, latestStart].
+    const distance = (o: RoomOffer) => {
+      const s = parseHHMM(o.start);
+      return Math.max(0, valid.startMin - s, s - latestStart);
+    };
     candidates.sort(
       (a, b) => distance(a) - distance(b) || a.start.localeCompare(b.start) || a.room.capacity - b.room.capacity,
     );
@@ -93,12 +108,14 @@ export class SearchService {
   }
 
   /**
-   * Queries the requested window, then the same-length window at each later
-   * slot up to lookaheadMinutes, so rooms that free up soon after are offered.
-   * Merges the results per room. One room-source call per window.
+   * Queries a booking-length window at every slot start in the requested
+   * window, then at each later slot up to lookaheadMinutes past it, so rooms
+   * that free up soon after are offered. Merges the results per room.
+   * ponytail: one room-source call per slot, so a wide window means many paced
+   * requests (8:00-22:00 for 1 h is ~30 calls); query the whole window once if that gets slow.
    */
-  private async lookAhead(date: string, startMin: number, duration: number): Promise<RoomAvailability[]> {
-    const last = Math.min(startMin + this.policy.lookaheadMinutes, DAY_END - duration);
+  private async lookAhead(date: string, startMin: number, latestStart: number, duration: number): Promise<RoomAvailability[]> {
+    const last = Math.min(latestStart + this.policy.lookaheadMinutes, DAY_END - duration);
     const byRoom = new Map<number, RoomAvailability>();
     for (let s = startMin; s <= last; s += this.policy.slotMinutes) {
       for (const { room, free } of await this.rooms.getAvailability(date, s, s + duration)) {
@@ -120,8 +137,4 @@ export function isGroupRoom(room: Room): boolean {
 
 function offer(room: Room, startMin: number, endMin: number): RoomOffer {
   return { room, start: formatHHMM(startMin), end: formatHHMM(endMin) };
-}
-
-function covers(window: FreeWindow, start: number, end: number): boolean {
-  return window.start <= start && window.end >= end;
 }

@@ -18,6 +18,7 @@ describe("validateSearch", () => {
       date: "2026-11-23",
       startMin: 840,
       endMin: 900,
+      durationMin: 60,
       partySize: 3,
       category: undefined,
       needs: [],
@@ -86,6 +87,23 @@ describe("validateSearch", () => {
 
   it("rejects a date beyond the booking horizon", () => {
     rejects({ date: "2026-12-01" }, /up to 7 days ahead/);
+  });
+
+  it("treats start-end as a window when a duration is given (FR3)", () => {
+    const v = validateSearch({ ...base, start: "13:00", end: "17:00", durationMinutes: 120 }, DEFAULT_SEARCH_POLICY, NOW);
+    expect(v).toMatchObject({ startMin: 780, endMin: 1020, durationMin: 120 });
+  });
+
+  it("caps the duration, not the window, when a duration is given (FR7)", () => {
+    const req = { ...base, start: "13:00", end: "18:00" };
+    expect(() => validateSearch({ ...req, durationMinutes: 300 }, DEFAULT_SEARCH_POLICY, NOW)).toThrow(/at most 120 minutes/);
+  });
+
+  it("rejects a duration that does not fit the window or the slot grid", () => {
+    expect(() => validateSearch({ ...base, durationMinutes: 90 }, DEFAULT_SEARCH_POLICY, NOW)).toThrow(/does not fit/);
+    expect(() => validateSearch({ ...base, end: "17:00", durationMinutes: 45 }, DEFAULT_SEARCH_POLICY, NOW)).toThrow(
+      /30-minute slots/,
+    );
   });
 
   it("accepts the last day of the 7-day horizon (NFR6)", () => {
