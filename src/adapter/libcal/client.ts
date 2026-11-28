@@ -3,12 +3,9 @@ import { LibraryUnavailableError } from "../../domain/errors.js";
 export interface LibCalClientOptions {
   /** Site origin, e.g. https://librarycal.mtroyal.ca */
   baseUrl: string;
-  /** LibCal location id for MRU Library group rooms (lid=1140). */
   locationId: number;
-  /** Sent on every request so the library can identify this client. Contains no personal data. */
   userAgent: string;
   timeoutMs: number;
-  /** Minimum gap between requests, so the adapter never hammers the site. */
   minIntervalMs: number;
 }
 
@@ -17,15 +14,12 @@ export const DEFAULT_LIBCAL_OPTIONS: LibCalClientOptions = {
   locationId: 1140,
   userAgent: "mru-room-booking-mcp/0.1 (read-only availability client)",
   timeoutMs: 10_000,
-  minIntervalMs: 500,
+  minIntervalMs: 1000,
 };
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-/**
- * Low-level HTTP access to LibCal. Read-only: this client never books or cancels.
- * Every request is serialised, spaced by minIntervalMs, and times out.
- */
+/** Read-only HTTP access to LibCal. Requests are serialised, spaced by minIntervalMs, and time out. */
 export class LibCalClient {
   private chain: Promise<unknown> = Promise.resolve();
   private lastRequestAt: number | undefined;
@@ -37,27 +31,39 @@ export class LibCalClient {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
-  /**
-   * HTML of the space search page for one window: every bookable space free
-   * for [start, end), plus LibCal's nearest alternatives. `start`/`end` are
-   * HH:mm; an end of "24:00" means midnight. All groupings and sizes are
-   * requested (gid=0, capacity=0); filtering happens in the search service.
-   */
-  async fetchSearchPage(date: string, start: string, end: string): Promise<string> {
-    const query = new URLSearchParams({
-      m: "t",
+  /** Availability grid JSON for every space from `startDate` up to (not including) `endDate`. */
+  async fetchGrid(startDate: string, endDate: string): Promise<string> {
+    const body = new URLSearchParams({
       lid: String(this.options.locationId),
       gid: "0",
-      capacity: "0",
-      date,
-      "date-end": date,
-      start,
-      end,
+      eid: "-1",
+      seat: "0",
+      seatId: "0",
+      zone: "0",
+      start: startDate,
+      end: endDate,
+      pageIndex: "0",
+      pageSize: "500",
     });
-    return this.request(`${this.options.baseUrl}/spaces?${query}`, {
-      method: "GET",
-      headers: { Accept: "text/html" },
+    return this.request(`${this.options.baseUrl}/spaces/availability/grid`, {
+      method: "POST",
+      body,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        // LibCal answers "Invalid Referrer." without these.
+        Referer: `${this.options.baseUrl}/spaces?lid=${this.options.locationId}`,
+        Origin: this.options.baseUrl,
+      },
     });
+  }
+
+  async fetchSpacePage(eid: number): Promise<string> {
+    return this.request(this.bookingUrl(eid), { method: "GET", headers: { Accept: "text/html" } });
+  }
+
+  bookingUrl(eid: number, date?: string): string {
+    return `${this.options.baseUrl}/space/${eid}${date ? `?date=${date}` : ""}`;
   }
 
   private request(url: string, init: RequestInit): Promise<string> {
@@ -83,7 +89,6 @@ export class LibCalClient {
         clearTimeout(timer);
       }
     };
-    // Chain requests so they run one after another.
     const next = this.chain.then(run, run);
     this.chain = next.catch(() => undefined);
     return next;

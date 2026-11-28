@@ -89,12 +89,12 @@ describe("validateSearch", () => {
     rejects({ date: "2026-12-01" }, /up to 7 days ahead/);
   });
 
-  it("treats start-end as a window when a duration is given (FR3)", () => {
+  it("treats start-end as a window when a duration is given", () => {
     const v = validateSearch({ ...base, start: "13:00", end: "17:00", durationMinutes: 120 }, DEFAULT_SEARCH_POLICY, NOW);
     expect(v).toMatchObject({ startMin: 780, endMin: 1020, durationMin: 120 });
   });
 
-  it("caps the duration, not the window, when a duration is given (FR7)", () => {
+  it("caps the duration, not the window, when a duration is given", () => {
     const req = { ...base, start: "13:00", end: "18:00" };
     expect(() => validateSearch({ ...req, durationMinutes: 300 }, DEFAULT_SEARCH_POLICY, NOW)).toThrow(/at most 120 minutes/);
   });
@@ -106,7 +106,7 @@ describe("validateSearch", () => {
     );
   });
 
-  it("accepts the last day of the 7-day horizon (NFR6)", () => {
+  it("accepts the last day of the 7-day horizon", () => {
     expect(validateSearch({ ...base, date: "2026-11-30" }, DEFAULT_SEARCH_POLICY, NOW).date).toBe("2026-11-30");
   });
 

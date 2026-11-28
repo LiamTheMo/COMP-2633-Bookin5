@@ -6,7 +6,7 @@ import { addDays, localNow, LOCAL_TIMEZONE } from "../../src/domain/time.js";
 
 /*
  * Read-only checks against the real MRU LibCal site. Skipped unless LIVE=1.
- * Makes only GET requests to the public search page; never books or cancels.
+ * Reads the public availability grid; never books or cancels.
  */
 const live = process.env.LIVE === "1";
 
@@ -15,12 +15,13 @@ describe.skipIf(!live)("live: MRU LibCal read-only", () => {
   const source = new LibCalRoomSource(client);
   const tomorrow = addDays(localNow(new Date(), LOCAL_TIMEZONE).date, 1);
 
-  it("reads rooms and offered windows from the search page", async () => {
-    // 23:00-24:00 is the quietest hour, so the library should have something free.
-    const rooms = await source.getAvailability(tomorrow, 1380, 1440);
-    expect(rooms.length).toBeGreaterThan(0);
-    expect(rooms.some(({ free }) => free.some((w) => w.start === 1380 && w.end === 1440))).toBe(true);
-    for (const { room, free } of rooms) {
+  it("reads every room's hours and free windows from the grid", async () => {
+    const rooms = await source.getAvailability(tomorrow);
+    expect(rooms.length).toBeGreaterThan(20);
+    // 23:00-24:00 is the quietest hour, so some 24-hour room should be free.
+    expect(rooms.some(({ free }) => free.some((w) => w.start <= 1380 && w.end === 1440))).toBe(true);
+    for (const { room, free, open } of rooms) {
+      expect(open!.length).toBeGreaterThan(0);
       expect(room.name.length).toBeGreaterThan(0);
       expect(room.capacity).toBeGreaterThan(0);
       expect(room.grouping.length).toBeGreaterThan(0);

@@ -1,86 +1,64 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseSearchPage } from "../../src/adapter/libcal/parse.js";
+import { parseGrid, parseSpacePage } from "../../src/adapter/libcal/parse.js";
 import { LibraryFormatError } from "../../src/domain/errors.js";
 
-// Captured from the live search page for Tuesday 2026-11-24.
-// 14:00-15:00: one pod (Pod 8) free for the whole window, plus "next available" alternatives.
-const afternoon = readFileSync(new URL("../fixtures/search-2026-11-24-1400.html", import.meta.url), "utf8");
-// 20:00-21:00: "best matches" only, no alternatives section.
-const evening = readFileSync(new URL("../fixtures/search-2026-11-24-2000.html", import.meta.url), "utf8");
+// Captured from the live site on 2026-11-28 for Monday 2026-11-30, trimmed to three rooms:
+// 7561 (1-B, open 24 h), 7575 (2-F, open 08:00-21:00), 7587 (3-A, "temporarily unavailable").
+const grid = readFileSync(new URL("../fixtures/grid-2026-11-30.json", import.meta.url), "utf8");
+// Pod 9's page: accessible and power filters.
+const pod9 = readFileSync(new URL("../fixtures/space-33379.html", import.meta.url), "utf8");
 
-const DATE = "2026-11-24";
+describe("parseGrid", () => {
+  it("merges free slots into windows and records bookable hours", () => {
+    const rooms = parseGrid(grid, "2026-11-30");
+    expect([...rooms.keys()]).toEqual([7561, 7575, 7587]);
+    expect(rooms.get(7561)).toEqual({
+      open: [{ start: 0, end: 1440 }],
+      free: [
+        { start: 0, end: 600 },
+        { start: 840, end: 870 },
+        { start: 1080, end: 1440 },
+      ],
+    });
+    expect(rooms.get(7575)!.open).toEqual([{ start: 480, end: 1260 }]);
+  });
 
-describe("parseSearchPage", () => {
-  it("reads room details and the offered window from each result", () => {
-    const rooms = parseSearchPage(afternoon, DATE);
-    expect(rooms.find((r) => r.room.id === 7586)).toEqual({
-      room: {
-        id: 7586,
-        name: "2-Q group room (2nd floor, EL2407)",
-        grouping: "Group Rooms - 2nd & 3rd Floor",
-        capacity: 5,
-        features: { accessible: false, power: true, videoConferencing: false },
-      },
-      free: [{ start: 960, end: 1020 }], // next available 16:00-17:00
+  it("ignores slots on other dates", () => {
+    expect(parseGrid(grid, "2026-12-01").size).toBe(0);
+  });
+
+  it("merges slots even when the site sends them out of order", () => {
+    const json = JSON.stringify({
+      slots: [
+        { start: "2026-11-30 10:30:00", end: "2026-11-30 11:00:00", itemId: 1 },
+        { start: "2026-11-30 10:00:00", end: "2026-11-30 10:30:00", itemId: 1 },
+      ],
+    });
+    expect(parseGrid(json, "2026-11-30").get(1)!.free).toEqual([{ start: 600, end: 660 }]);
+  });
+
+  it("throws LibraryFormatError on an error page, a missing slots list or a bad slot", () => {
+    expect(() => parseGrid("Invalid Referrer.", "2026-11-30")).toThrow(LibraryFormatError);
+    expect(() => parseGrid("{}", "2026-11-30")).toThrow(LibraryFormatError);
+    expect(() => parseGrid('{"slots":[{"start":"10:00"}]}', "2026-11-30")).toThrow(LibraryFormatError);
+    expect(() => parseGrid('{"slots":[{"itemId":1,"start":"10:00","end":"10:30"}]}', "2026-11-30")).toThrow(/Unexpected time/);
+  });
+});
+
+describe("parseSpacePage", () => {
+  it("reads the room's name, grouping, capacity and amenities", () => {
+    expect(parseSpacePage(pod9, 33379)).toEqual({
+      id: 33379,
+      name: "Pod 9 (Priority Seating for Accessibility)",
+      grouping: "Individual Study Pods",
+      capacity: 1,
+      features: { accessible: true, power: true, videoConferencing: false },
     });
   });
 
-  it("reads amenities from the result icons", () => {
-    const rooms = parseSearchPage(afternoon, DATE);
-    expect(rooms.find((r) => r.room.id === 33379)!.room.features).toEqual({ accessible: true, power: true, videoConferencing: false });
-    expect(rooms.find((r) => r.room.id === 35064)!.room.features).toEqual({ accessible: false, power: false, videoConferencing: false });
-    // No video-conferencing room was free in the capture, so swap one icon title in.
-    const vc = afternoon.replaceAll('title="Accessible Seat/Space"', 'title="Video Conferencing"');
-    expect(parseSearchPage(vc, DATE).find((r) => r.room.id === 33379)!.room.features).toEqual({
-      accessible: false,
-      power: true,
-      videoConferencing: true,
-    });
-  });
-
-  it("includes both full matches and alternatives", () => {
-    const rooms = parseSearchPage(afternoon, DATE);
-    const pod8 = rooms.find((r) => r.room.id === 33317)!;
-    expect(pod8.room).toMatchObject({ name: "Pod 8", grouping: "Individual Study Pods", capacity: 1 });
-    expect(pod8.free).toEqual([{ start: 840, end: 900 }]);
-    expect(rooms.length).toBeGreaterThan(3);
-  });
-
-  it("returns well-formed windows for every room", () => {
-    for (const html of [afternoon, evening]) {
-      for (const { room, free } of parseSearchPage(html, DATE)) {
-        expect(room.name.length).toBeGreaterThan(0);
-        expect(room.grouping).not.toMatch(/&amp;|<|\s$/);
-        expect(room.capacity).toBeGreaterThan(0);
-        for (const w of free) expect(w.end).toBeGreaterThan(w.start);
-      }
-    }
-  });
-
-  it("parses a page with no alternatives section", () => {
-    const rooms = parseSearchPage(evening, DATE);
-    expect(rooms.length).toBeGreaterThan(0);
-    for (const { free } of rooms) expect(free).toContainEqual({ start: 1200, end: 1260 });
-  });
-
-  it("treats an end on the next day as midnight (1440)", () => {
-    const html = afternoon
-      .replaceAll('value="2026-11-24 14:00:00"', 'value="2026-11-24 23:00:00"')
-      .replaceAll('value="2026-11-24 15:00:00"', 'value="2026-11-25 00:00:00"');
-    expect(parseSearchPage(html, DATE).find((r) => r.room.id === 33317)!.free).toEqual([{ start: 1380, end: 1440 }]);
-  });
-
-  it("returns no rooms when the results section is empty", () => {
-    expect(parseSearchPage('<div id="s-lc-eq-search-results"><h2>No matches</h2></div>', DATE)).toEqual([]);
-  });
-
-  it("throws LibraryFormatError when the page has no results section", () => {
-    expect(() => parseSearchPage("<html>Maintenance</html>", DATE)).toThrow(LibraryFormatError);
-  });
-
-  it("throws LibraryFormatError when a result is missing a field", () => {
-    const broken = afternoon.replaceAll('title="The capacity of this space"', 'title="x"');
-    expect(() => parseSearchPage(broken, DATE)).toThrow(/missing its capacity/);
+  it("throws LibraryFormatError for a temporarily unavailable room or the wrong id", () => {
+    expect(() => parseSpacePage("<div>This resource is temporarily unavailable.</div>", 7587)).toThrow(LibraryFormatError);
+    expect(() => parseSpacePage(pod9, 7561)).toThrow(/no resource entry/);
   });
 });

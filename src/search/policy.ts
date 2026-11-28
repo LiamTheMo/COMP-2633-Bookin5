@@ -2,13 +2,7 @@ import { PolicyViolationError } from "../domain/errors.js";
 import type { RoomFeatures } from "../domain/types.js";
 import { addDays, formatHHMM, isValidIsoDate, localNow, parseHHMM, SLOT_MINUTES } from "../domain/time.js";
 
-/**
- * Booking rules the search enforces before any request reaches the library.
- *
- * Only the slot size is confirmed on the library site. The booking horizon is
- * set by NFR6 (7 days). The duration cap is a placeholder until the library
- * confirms it; it is kept here so changing it is one edit.
- */
+/** Booking rules checked before any request reaches the library. */
 export interface SearchPolicy {
   slotMinutes: number;
   minDurationMinutes: number;
@@ -27,7 +21,7 @@ export const DEFAULT_SEARCH_POLICY: SearchPolicy = {
   slotMinutes: SLOT_MINUTES,
   minDurationMinutes: 30,
   maxDurationMinutes: 120, // UNVERIFIED: confirm with the library
-  maxDaysAhead: 7, // NFR6: queries only up to 7 days ahead
+  maxDaysAhead: 7,
   groupRoomsOnly: true,
   lookaheadMinutes: 120,
   categories: ["Group Rooms - 1st Floor", "Group Rooms - 2nd & 3rd Floor", "Hybrid Group Rooms"],
@@ -49,6 +43,8 @@ export interface SearchRequest {
   accessible?: boolean;
   power?: boolean;
   videoConferencing?: boolean;
+  /** Optional: only these room ids (e.g. the student's favourites). */
+  roomIds?: number[];
 }
 
 export interface ValidatedRequest {
@@ -63,18 +59,14 @@ export interface ValidatedRequest {
   category: string | undefined;
   /** Features every returned room must have. */
   needs: (keyof RoomFeatures)[];
+  roomIds: number[] | undefined;
 }
 
 const FEATURES = ["accessible", "power", "videoConferencing"] as const;
 
-/**
- * Validates a search request. Throws PolicyViolationError with a message the
- * assistant can show the student. Pure: `now` is passed in.
- */
+/** Validates a search request. Throws PolicyViolationError with a message for the student. */
 export function validateSearch(req: SearchRequest, policy: SearchPolicy, now: Date): ValidatedRequest {
-  if (!isValidIsoDate(req.date)) {
-    throw new PolicyViolationError(`Date "${req.date}" is not a valid YYYY-MM-DD date.`);
-  }
+  validateDate(req.date, policy, now);
 
   const startMin = safeParseTime(req.start, "start");
   const endMin = safeParseTime(req.end, "end");
@@ -110,12 +102,6 @@ export function validateSearch(req: SearchRequest, policy: SearchPolicy, now: Da
   }
 
   const today = localNow(now);
-  if (req.date < today.date) {
-    throw new PolicyViolationError(`${req.date} is in the past.`);
-  }
-  if (req.date > addDays(today.date, policy.maxDaysAhead)) {
-    throw new PolicyViolationError(`Rooms can only be booked up to ${policy.maxDaysAhead} days ahead.`);
-  }
   if (req.date === today.date && startMin < today.minutes) {
     throw new PolicyViolationError(`${formatHHMM(startMin)} has already passed today.`);
   }
@@ -136,7 +122,34 @@ export function validateSearch(req: SearchRequest, policy: SearchPolicy, now: Da
     return value === true;
   });
 
-  return { date: req.date, startMin, endMin, durationMin: duration, partySize: req.partySize, category, needs };
+  if (req.roomIds !== undefined && (!Array.isArray(req.roomIds) || req.roomIds.length === 0)) {
+    throw new PolicyViolationError("No rooms to search: the room list is empty.");
+  }
+
+  return {
+    date: req.date,
+    startMin,
+    endMin,
+    durationMin: duration,
+    partySize: req.partySize,
+    category,
+    needs,
+    roomIds: req.roomIds,
+  };
+}
+
+/** Checks a date is real, not past, and within the booking horizon. */
+export function validateDate(date: string, policy: SearchPolicy, now: Date): void {
+  if (!isValidIsoDate(date)) {
+    throw new PolicyViolationError(`Date "${date}" is not a valid YYYY-MM-DD date.`);
+  }
+  const today = localNow(now).date;
+  if (date < today) {
+    throw new PolicyViolationError(`${date} is in the past.`);
+  }
+  if (date > addDays(today, policy.maxDaysAhead)) {
+    throw new PolicyViolationError(`Rooms can only be booked up to ${policy.maxDaysAhead} days ahead.`);
+  }
 }
 
 function safeParseTime(value: string, label: string): number {

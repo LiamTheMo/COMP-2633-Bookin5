@@ -1,18 +1,28 @@
 {
   "name": "mru-room-booking-mcp",
-  "version": "0.1.0",
-  "description": "MCP server for booking MRU library group study rooms (sprint 1: search service and LibCal adapter)",
+  "version": "0.2.0",
+  "description": "MCP server that finds free MRU Library group study rooms and opens their Book Now page",
   "private": true,
   "type": "module",
+  "bin": {
+    "mru-rooms": "dist/mcp.js"
+  },
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start": "node dist/mcp.js",
+    "prepare": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:live": "vitest run test/live"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "open": "^10.2.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

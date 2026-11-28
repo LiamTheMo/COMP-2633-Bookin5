@@ -66,8 +66,7 @@ describe("SearchService.findRooms", () => {
     expect(result.nextAvailable.map((o) => [o.start, o.room.id])).toEqual([["16:00", 5]]);
   });
 
-  it("finds a free gap of the duration inside a wider window, earliest start first (FR3, FR5)", async () => {
-    // Week 1 example: "4 people, 1-5 pm, 2 h" (party of 3 here so room 1 qualifies by size).
+  it("finds a free gap of the duration inside a wider window, earliest start first", async () => {
     const result = await serviceWith(fixtures).findRooms({
       date: "2026-11-23",
       start: "13:00",
@@ -261,5 +260,83 @@ describe("SearchService.findRooms", () => {
       service.findRooms({ date: "2026-11-23", start: "15:10", end: "16:00", partySize: 2 }),
     ).rejects.toThrow(/30-minute boundary/);
     expect(called).toBe(false);
+  });
+});
+
+describe("SearchService: favourites and opening hours", () => {
+  it("searches only the given room ids (favourites)", async () => {
+    const result = await serviceWith(fixtures).findRooms({
+      date: "2026-11-23",
+      start: "15:00",
+      end: "16:00",
+      partySize: 3,
+      roomIds: [3],
+    });
+    expect(result.matches.map((m) => m.room.id)).toEqual([3]);
+  });
+
+  it("rejects a window no suitable room is open for, naming the hours", async () => {
+    const open = [{ start: 480, end: 1260 }]; // 08:00-21:00
+    const rooms = fixtures.map((a) => ({ ...a, open }));
+    await expect(
+      serviceWith(rooms).findRooms({ date: "2026-11-23", start: "21:00", end: "22:00", partySize: 2 }),
+    ).rejects.toThrow(/bookable hours that day: 08:00-21:00/);
+    // A window that overlaps the hours by enough is fine.
+    await expect(
+      serviceWith(rooms).findRooms({ date: "2026-11-23", start: "20:00", end: "22:00", durationMinutes: 60, partySize: 2 }),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("SearchService.listRooms", () => {
+  it("lists group rooms only, by grouping then name", async () => {
+    const rooms = await serviceWith(fixtures).listRooms();
+    expect(rooms.map((r) => r.id)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("SearchService.roomDay", () => {
+  it("returns a room's free windows, dropping time already past today", async () => {
+    // NOW is 06:00 or 07:00 in Edmonton; give the room a window that started at midnight.
+    const room = { ...fixtures[0]!, free: [{ start: 0, end: 600 }, ...fixtures[0]!.free], open: [{ start: 0, end: 1440 }] };
+    const day = await serviceWith([room]).roomDay(1, "2026-11-23");
+    expect(day.open).toEqual([{ start: "00:00", end: "24:00" }]);
+    expect(day.free[0]!.start).toMatch(/^0[67]:00$/);
+    expect(day.free.slice(1)).toEqual([
+      { start: "15:00", end: "16:00" },
+      { start: "20:00", end: "24:00" },
+    ]);
+  });
+
+  it("rejects an unknown room and a date past the horizon", async () => {
+    await expect(serviceWith(fixtures).roomDay(42, "2026-11-23")).rejects.toThrow(/does not list room 42/);
+    await expect(serviceWith(fixtures).roomDay(1, "2026-12-01")).rejects.toThrow(/7 days ahead/);
+  });
+});
+
+describe("SearchService.nextFree", () => {
+  it("returns the first free slot from now that fits the duration", async () => {
+    expect(await serviceWith(fixtures).nextFree(1, 60)).toMatchObject({ date: "2026-11-23", start: "15:00", end: "16:00" });
+    expect(await serviceWith(fixtures).nextFree(1, 120)).toMatchObject({ date: "2026-11-23", start: "20:00", end: "22:00" });
+  });
+
+  it("looks at later days when today is full, and returns null when the horizon is full", async () => {
+    const days: string[] = [];
+    const room = fixtures[0]!.room;
+    const source: RoomSource = {
+      getAvailability: async (date) => {
+        days.push(date);
+        return [{ room, free: date === "2026-11-25" ? [{ start: 600, end: 660 }] : [] }];
+      },
+    };
+    const service = new SearchService(source, undefined, () => NOW);
+    expect(await service.nextFree(1)).toMatchObject({ date: "2026-11-25", start: "10:00", end: "10:30" });
+    expect(days).toEqual(["2026-11-23", "2026-11-24", "2026-11-25"]);
+    expect(await service.nextFree(1, 120)).toBeNull();
+  });
+
+  it("rejects an unknown room and an invalid duration", async () => {
+    await expect(serviceWith(fixtures).nextFree(42)).rejects.toThrow(/does not list room 42/);
+    await expect(serviceWith(fixtures).nextFree(1, 300)).rejects.toThrow(/30-120 minutes/);
   });
 });
