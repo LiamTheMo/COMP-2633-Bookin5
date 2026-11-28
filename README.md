@@ -61,7 +61,8 @@ When the Book Now page opens, sign in with your MRU account and select the time 
 ### Rules the server checks first
 
 - Times are Calgary local time, on the half hour.
-- Bookings are 30 to 120 minutes long, from now up to 7 days ahead.
+- Bookings are 30 minutes to 4 hours long, from now up to 7 days ahead.
+- The library also limits each student to 4 hours per day and 3 bookings per week (Sunday to Saturday). The server can't see your existing bookings, so the library site enforces those two.
 - The room must be open (the 2nd & 3rd floor and hybrid rooms keep shorter hours than the 1st floor).
 
 If a request breaks a rule, you get a short explanation instead of a room.
@@ -110,8 +111,4 @@ After changing `src/`, run `npm run build` and restart Claude Desktop.
 
 **Refreshing the room snapshot.** If the library renames, resizes or adds rooms, regenerate `src/adapter/libcal/rooms.ts` from the `/space/{id}` pages (see `parseSpacePage`). New rooms still work without a refresh, at the cost of one extra request each per server start.
 
-**Assumption to confirm with the library:** the 120-minute maximum booking length (`maxDurationMinutes` in `src/search/policy.ts`). The 7-day horizon is our own rule.
-
-## Project documents
-
-- Sprint 2 report: [docs/sprint-2.md](docs/sprint-2.md)
+Booking rules come from the library's [Group Room FAQ](https://libraryhelp.mtroyal.ca/faq/204484) and live in `src/search/policy.ts`.

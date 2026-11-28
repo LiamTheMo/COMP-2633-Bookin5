@@ -20,8 +20,10 @@ const search = new SearchService(source);
 const server = new McpServer({ name: "mru-rooms", version: "0.2.0" });
 
 const RULES =
-  "Times are Calgary local time (HH:mm, 24-hour) on a 30-minute grid; bookings are 30-120 minutes, " +
-  `from today up to ${DEFAULT_SEARCH_POLICY.maxDaysAhead} days ahead.`;
+  "Times are Calgary local time (HH:mm, 24-hour) on a 30-minute grid; bookings are " +
+  `${DEFAULT_SEARCH_POLICY.minDurationMinutes}-${DEFAULT_SEARCH_POLICY.maxDurationMinutes} minutes, ` +
+  `from today up to ${DEFAULT_SEARCH_POLICY.maxDaysAhead} days ahead. ` +
+  "The library allows each student 4 hours of bookings per day and 3 bookings per week.";
 const date = z.string().describe("YYYY-MM-DD, Calgary local date");
 const roomId = z.number().int().describe("Room id from list_rooms or search_rooms");
 
@@ -82,7 +84,7 @@ server.registerTool(
         .number()
         .int()
         .optional()
-        .describe("Booking length in minutes (multiple of 30, max 120). Omit to book the whole start-end window."),
+        .describe(`Booking length in minutes (multiple of 30, max ${DEFAULT_SEARCH_POLICY.maxDurationMinutes}). Omit to book the whole start-end window.`),
       partySize: z.number().int().min(1).optional().describe("Number of people; omit to use the saved default"),
       category: z.enum(DEFAULT_SEARCH_POLICY.categories).optional(),
       accessible: z.boolean().optional(),
@@ -118,7 +120,7 @@ server.registerTool(
     description: `The first free slot for one room from now, looking up to ${DEFAULT_SEARCH_POLICY.maxDaysAhead} days ahead.`,
     inputSchema: {
       roomId,
-      durationMinutes: z.number().int().optional().describe("Minimum free length in minutes (30-120, default 30)"),
+      durationMinutes: z.number().int().optional().describe(`Minimum free length in minutes (30-${DEFAULT_SEARCH_POLICY.maxDurationMinutes}, default 30)`),
     },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },

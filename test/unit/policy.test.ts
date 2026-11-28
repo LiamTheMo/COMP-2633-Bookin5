@@ -73,7 +73,11 @@ describe("validateSearch", () => {
   });
 
   it("rejects a booking longer than the maximum", () => {
-    rejects({ start: "10:00", end: "13:00" }, /at most 120 minutes/);
+    rejects({ start: "10:00", end: "15:00" }, /at most 240 minutes/);
+  });
+
+  it("accepts a 4-hour booking, the library's daily limit", () => {
+    expect(validateSearch({ ...base, start: "10:00", end: "14:00" }, DEFAULT_SEARCH_POLICY, NOW).durationMin).toBe(240);
   });
 
   it("rejects a party size below one or not a whole number", () => {
@@ -96,7 +100,7 @@ describe("validateSearch", () => {
 
   it("caps the duration, not the window, when a duration is given", () => {
     const req = { ...base, start: "13:00", end: "18:00" };
-    expect(() => validateSearch({ ...req, durationMinutes: 300 }, DEFAULT_SEARCH_POLICY, NOW)).toThrow(/at most 120 minutes/);
+    expect(() => validateSearch({ ...req, durationMinutes: 300 }, DEFAULT_SEARCH_POLICY, NOW)).toThrow(/at most 240 minutes/);
   });
 
   it("rejects a duration that does not fit the window or the slot grid", () => {

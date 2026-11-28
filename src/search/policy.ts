@@ -20,7 +20,8 @@ export interface SearchPolicy {
 export const DEFAULT_SEARCH_POLICY: SearchPolicy = {
   slotMinutes: SLOT_MINUTES,
   minDurationMinutes: 30,
-  maxDurationMinutes: 120, // UNVERIFIED: confirm with the library
+  // Library Group Room FAQ: up to 4 hours per student per day, up to 7 days in advance.
+  maxDurationMinutes: 240,
   maxDaysAhead: 7,
   groupRoomsOnly: true,
   lookaheadMinutes: 120,

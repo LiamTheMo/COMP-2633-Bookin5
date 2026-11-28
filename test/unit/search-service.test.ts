@@ -337,6 +337,6 @@ describe("SearchService.nextFree", () => {
 
   it("rejects an unknown room and an invalid duration", async () => {
     await expect(serviceWith(fixtures).nextFree(42)).rejects.toThrow(/does not list room 42/);
-    await expect(serviceWith(fixtures).nextFree(1, 300)).rejects.toThrow(/30-120 minutes/);
+    await expect(serviceWith(fixtures).nextFree(1, 300)).rejects.toThrow(/30-240 minutes/);
   });
 });
